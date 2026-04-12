@@ -4,13 +4,17 @@ import numpy as np
 # =============================
 # CONFIG
 # =============================
-THRESHOLD = 0.4
+INPUT_PATH = "datasets/usdc_datasets.csv"
+OUTPUT_PATH = "datasets/usdc_training_ready.csv"
+
 np.random.seed(42)
 
 # =============================
 # LOAD DATA
 # =============================
-df = pd.read_csv("datasets/usdt_datasets.csv")
+df = pd.read_csv(INPUT_PATH)
+
+print(f"📥 Loaded dataset: {len(df)} rows")
 
 # =============================
 # CLEANING
@@ -25,8 +29,12 @@ numeric_cols = [
 for col in numeric_cols:
     df[col] = df[col].fillna(0)
 
+# Ensure wallet age is valid
 df["wallet_age_days"] = df["wallet_age_days"].apply(lambda x: max(x, 1))
 
+# =============================
+# AGGREGATE PER WALLET
+# =============================
 df = df.groupby(["wallet", "token"], as_index=False).agg({
     "wallet_age_days": "max",
     "avg_tx": "mean",
@@ -38,9 +46,13 @@ df = df.groupby(["wallet", "token"], as_index=False).agg({
     "avg_time_between_tx_sec": "mean"
 })
 
+# =============================
+# ROUND + TRANSFORM
+# =============================
 df["avg_tx"] = df["avg_tx"].round(6)
 df["recent_tx"] = df["recent_tx"].round(6)
 
+# log transform (important for ML stability)
 df["avg_tx"] = np.log1p(df["avg_tx"])
 df["recent_tx"] = np.log1p(df["recent_tx"])
 
@@ -48,7 +60,7 @@ df["wallet"] = df["wallet"].astype(str)
 df["token"] = df["token"].astype(str)
 
 # =============================
-# RULE FEATURES
+# RULE-BASED FEATURES
 # =============================
 df["is_high_freq"] = df["tx_per_day"] > 100
 df["is_low_value"] = df["avg_tx"] < np.log1p(0.01)
@@ -61,7 +73,7 @@ df["risk_score_rule"] = (
 )
 
 # =============================
-# REALISTIC LABEL
+# LABEL GENERATION (SUPERVISED TARGET)
 # =============================
 df["label"] = (
     (df["tx_per_day"] > 150) |
@@ -69,11 +81,12 @@ df["label"] = (
     (df["wallet_age_days"] < 2)
 ).astype(int)
 
+# Add noise for realism (prevents overfitting)
 noise = np.random.rand(len(df)) < 0.05
 df.loc[noise, "label"] = 1 - df.loc[noise, "label"]
 
 # =============================
-# FEATURES (FOR ML)
+# FINAL FEATURE SET
 # =============================
 feature_cols = [
     "wallet_age_days",
@@ -86,73 +99,23 @@ feature_cols = [
     "avg_time_between_tx_sec"
 ]
 
-X = df[feature_cols]
-y = df["label"]
+print("\n🧠 Final Features:")
+for f in feature_cols:
+    print("-", f)
 
 # =============================
-# NORMALIZE
+# DATASET SUMMARY
 # =============================
-from sklearn.preprocessing import StandardScaler
+print("\n🔥 Dataset Summary:")
+print(df["label"].value_counts())
 
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
-
-# =============================
-# TRAIN MODEL
-# =============================
-from sklearn.ensemble import RandomForestClassifier
-
-model = RandomForestClassifier(n_estimators=100)
-model.fit(X_scaled, y)
+print("\n📊 Basic Stats:")
+print(df[feature_cols].describe().round(3))
 
 # =============================
-# PREDICTIONS (FULL DATASET)
+# SAVE CLEAN DATASET
 # =============================
-df["risk_probability"] = model.predict_proba(X_scaled)[:, 1]
+df.to_csv(OUTPUT_PATH, index=False)
 
-df["prediction"] = (df["risk_probability"] > THRESHOLD).astype(int)
-
-# =============================
-# DECISION ENGINE
-# =============================
-def classify_risk(prob):
-    if prob >= 0.8:
-        return "BLOCK"
-    elif prob >= 0.5:
-        return "REVIEW"
-    else:
-        return "ALLOW"
-
-df["decision"] = df["risk_probability"].apply(classify_risk)
-
-# =============================
-# CONFIDENCE SCORE
-# =============================
-df["confidence"] = np.abs(df["risk_probability"] - 0.5) * 2
-
-# =============================
-# GLOBAL STATS
-# =============================
-print("\n🔥 Global Risk Stats:")
-print(f"Avg Risk: {df['risk_probability'].mean():.4f}")
-print(f"Max Risk: {df['risk_probability'].max():.4f}")
-print(f"Min Risk: {df['risk_probability'].min():.4f}")
-
-print("\n🔥 Decision Distribution:")
-print(df["decision"].value_counts())
-
-# =============================
-# FEATURE IMPORTANCE
-# =============================
-feature_importance = pd.Series(model.feature_importances_, index=feature_cols)
-feature_importance = feature_importance.sort_values(ascending=False)
-
-print("\n🔥 Feature Importance:")
-print(feature_importance)
-
-# =============================
-# FINAL SAVE (🔥 IMPORTANT)
-# =============================
-df.to_csv("datasets/usdt_training_ready.csv", index=False)
-
-print("\n✅ FINAL TRAINING DATASET READY")
+print(f"\n✅ Saved cleaned dataset → {OUTPUT_PATH}")
+print("🚀 Ready for training (train_ml.py)")

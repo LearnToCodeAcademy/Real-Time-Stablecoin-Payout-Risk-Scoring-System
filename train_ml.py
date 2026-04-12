@@ -5,7 +5,7 @@ import pickle
 # =============================
 # LOAD TRAINING DATA
 # =============================
-df = pd.read_csv("datasets/usdt_training_ready.csv")
+df = pd.read_csv("datasets/usdc_training_ready.csv")
 
 # =============================
 # FEATURES (MUST MATCH TRAINING)
@@ -43,16 +43,16 @@ model.fit(X_scaled, y)
 # =============================
 # SAVE EVERYTHING 🔥
 # =============================
-with open("models/usdt_model.pkl", "wb") as f:
+with open("models/usdc_model.pkl", "wb") as f:
     pickle.dump(model, f)
 
-with open("models/usdt_scaler.pkl", "wb") as f:
+with open("models/usdc_scaler.pkl", "wb") as f:
     pickle.dump(scaler, f)
 
-with open("models/usdt_features.pkl", "wb") as f:
+with open("models/usdc_features.pkl", "wb") as f:
     pickle.dump(feature_cols, f)
 
-print("🔥 USDT MODEL TRAINED & SAVED")
+print("🔥 USDC MODEL TRAINED & SAVED")
 
 # =============================
 # QUICK TEST (VERY IMPORTANT)
