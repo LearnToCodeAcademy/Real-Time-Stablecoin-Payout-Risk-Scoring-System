@@ -1,0 +1,4 @@
+wallet_age_days,avg_tx,recent_tx,tx_frequency,wallet,token,tx_per_min,tx_per_hour,tx_per_day,avg_time_between_tx_sec
+3,14.915,19.83,0.6666666666666666,0x742d35Cc6634C0532925a3b844Bc454e4438f44e,usdc,,,,
+7,1527.426212813187,92.118595,13.0,0x77300C71071eCa35Cb673a0b7571B2907dEB77C7,usdc,,,,
+0,3998.2,3998.2,1.0,0x28C6c06298d514Db089934071355E5743bf21d60,usdc,60.0,3600.0,86400.0,0.0
