@@ -1,3 +1,4 @@
+
 import psycopg2
 import time
 import os
@@ -5,7 +6,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 # =============================
-# LOAD ENV (FORCE PATH SAFE)
+# LOAD ENV
 # =============================
 BASE_DIR = Path(__file__).resolve().parent
 env_path = BASE_DIR / ".env"
@@ -15,7 +16,7 @@ load_dotenv(dotenv_path=env_path)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise Exception("❌ DATABASE_URL not found. Check your .env file location.")
+    raise Exception("❌ DATABASE_URL not found.")
 
 # =============================
 # CONNECT DB
@@ -26,7 +27,7 @@ cursor = conn.cursor()
 print("✅ DB CONNECTED")
 
 # =============================
-# GET FEATURES
+# FEATURES
 # =============================
 def get_features(wallet, token):
     try:
@@ -59,23 +60,8 @@ def get_features(wallet, token):
         return None
 
 
-# =============================
-# SAVE FEATURES (FIXED)
-# =============================
 def save_features(wallet, token, f):
     try:
-        # 🔥 CRITICAL FIX: convert all values to Python types
-        f = {
-            "wallet_age_days": int(f["wallet_age_days"]),
-            "avg_tx": float(f["avg_tx"]),
-            "recent_tx": float(f["recent_tx"]),
-            "tx_frequency": float(f["tx_frequency"]),
-            "tx_per_min": float(f["tx_per_min"]),
-            "tx_per_hour": float(f["tx_per_hour"]),
-            "tx_per_day": float(f["tx_per_day"]),
-            "avg_time_between_tx_sec": float(f["avg_time_between_tx_sec"])
-        }
-
         cursor.execute("""
             INSERT INTO wallet_features (
                 wallet, token,
@@ -99,19 +85,69 @@ def save_features(wallet, token, f):
         """, (
             wallet,
             token,
-            f["wallet_age_days"],
-            f["avg_tx"],
-            f["recent_tx"],
-            f["tx_frequency"],
-            f["tx_per_min"],
-            f["tx_per_hour"],
-            f["tx_per_day"],
-            f["avg_time_between_tx_sec"],
+            int(f["wallet_age_days"]),
+            float(f["avg_tx"]),
+            float(f["recent_tx"]),
+            float(f["tx_frequency"]),
+            float(f["tx_per_min"]),
+            float(f["tx_per_hour"]),
+            float(f["tx_per_day"]),
+            float(f["avg_time_between_tx_sec"]),
             int(time.time())
         ))
 
         conn.commit()
-        print("✅ SAVED TO DB")
+        print("✅ FEATURES SAVED")
 
     except Exception as e:
         print("❌ DB save error:", e)
+
+
+# =============================
+# LABELS (NEW 🔥)
+# =============================
+def get_label(wallet):
+    try:
+        cursor.execute("""
+            SELECT label, trusted
+            FROM wallet_labels
+            WHERE wallet=%s
+        """, (wallet.lower(),))
+
+        row = cursor.fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "label": row[0],
+            "trusted": bool(row[1])
+        }
+
+    except Exception as e:
+        print("❌ LABEL fetch error:", e)
+        return None
+
+
+def save_label(wallet, label, trusted):
+    try:
+        cursor.execute("""
+            INSERT INTO wallet_labels (wallet, label, trusted, updated_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (wallet)
+            DO UPDATE SET
+                label = EXCLUDED.label,
+                trusted = EXCLUDED.trusted,
+                updated_at = EXCLUDED.updated_at
+        """, (
+            wallet.lower(),
+            label,
+            trusted,
+            int(time.time())
+        ))
+
+        conn.commit()
+        print("🏷️ LABEL SAVED")
+
+    except Exception as e:
+        print("❌ LABEL save error:", e)

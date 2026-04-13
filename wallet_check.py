@@ -3,9 +3,7 @@ import pandas as pd
 import pickle
 import numpy as np
 import time
-from collections import Counter
 
-# ✅ IMPORT DB FUNCTIONS (IMPORTANT)
 from db import get_features, save_features
 
 # =============================
@@ -33,6 +31,30 @@ for token, path in TOKENS.items():
         print(f"⚠️ Missing model for {token}")
 
 # =============================
+# DECISION ENGINE
+# =============================
+def classify_decision(prob, conf, features, low_data=False):
+    if low_data:
+        return "REVIEW", "Insufficient data"
+
+    if features["wallet_age_days"] <= 1:
+        return "REVIEW", "New wallet"
+
+    if features["tx_per_day"] < 3:
+        return "REVIEW", "Low activity"
+
+    if conf < 0.3:
+        return "REVIEW", "Low confidence"
+
+    if prob >= 0.8:
+        return "BLOCK", "High risk"
+
+    elif prob >= 0.5:
+        return "REVIEW", "Moderate risk"
+
+    return "ALLOW", "Low risk"
+
+# =============================
 # FETCH TX
 # =============================
 def fetch_transactions(address):
@@ -47,10 +69,7 @@ def fetch_transactions(address):
             "apikey": API_KEY
         }
 
-        res = requests.get(BASE_URL, params=params).json()
-        result = res.get("result")
-
-        return result if isinstance(result, list) else []
+        return requests.get(BASE_URL, params=params).json().get("result", [])
     except:
         return []
 
@@ -66,7 +85,7 @@ def detect_token(transactions):
             if sym in ["USDT", "USDC"]:
                 counts[sym] = counts.get(sym, 0) + 1
 
-    return max(counts, key=counts.get) if counts else "USDT"
+    return max(counts, key=counts.get) if counts else None
 
 # =============================
 # FEATURE GEN
@@ -75,9 +94,6 @@ def generate_features(transactions):
     rows = []
 
     for tx in transactions:
-        if not isinstance(tx, dict):
-            continue
-
         try:
             amount = int(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
             timestamp = int(tx["timeStamp"])
@@ -85,8 +101,17 @@ def generate_features(transactions):
         except:
             continue
 
-    if len(rows) < 5:
-        return None
+    if len(rows) < 3:
+        return {
+            "wallet_age_days": 1,
+            "avg_tx": 0.0,
+            "recent_tx": 0.0,
+            "tx_frequency": 0.0,
+            "tx_per_min": 0.0,
+            "tx_per_hour": 0.0,
+            "tx_per_day": 0.0,
+            "avg_time_between_tx_sec": 0.0
+        }, True
 
     df = pd.DataFrame(rows)
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
@@ -101,126 +126,123 @@ def generate_features(transactions):
     )
 
     return {
-        "wallet_age_days": wallet_age,
-        "avg_tx": np.log1p(df["amount"].mean()),
-        "recent_tx": np.log1p(df["amount"].iloc[-1]),
-        "tx_frequency": len(df) / wallet_age,
-        "tx_per_min": len(df) / (total_seconds / 60),
-        "tx_per_hour": len(df) / (total_seconds / 3600),
-        "tx_per_day": len(df) / (total_seconds / 86400),
-        "avg_time_between_tx_sec": df["time_diff"].mean()
-    }
-
-# =============================
-# NETWORK DETECTION
-# =============================
-def detect_network_patterns(address, txs):
-    receivers, amounts, timestamps = [], [], []
-
-    for tx in txs:
-        if not isinstance(tx, dict):
-            continue
-
-        try:
-            if tx.get("from") == address:
-                receivers.append(tx.get("to"))
-
-            amount = int(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
-            amounts.append(round(amount, 6))
-            timestamps.append(int(tx["timeStamp"]))
-        except:
-            continue
-
-    unique_receivers = len(set(receivers))
-    receiver_counts = Counter(receivers)
-    top_receiver_freq = max(receiver_counts.values()) if receiver_counts else 0
-
-    amount_counts = Counter(amounts)
-    top_amount_ratio = max(amount_counts.values()) / len(amounts) if amounts else 0
-
-    timestamps.sort()
-    diffs = np.diff(timestamps) if len(timestamps) > 1 else []
-    fast_ratio = sum(d < 15 for d in diffs) / len(diffs) if len(diffs) > 0 else 0
-
-    if top_receiver_freq > 20:
-        return "BLOCK", "Clustered transfers"
-
-    if top_amount_ratio > 0.6 and fast_ratio > 0.4:
-        return "BLOCK", "Bot-like pattern"
-
-    if unique_receivers > 25 and fast_ratio > 0.3:
-        return "REVIEW", "Wide network pattern"
-
-    return None, None
-
-# =============================
-# ML DECISION
-# =============================
-def classify_risk(prob, conf):
-    if prob >= 0.8:
-        return "BLOCK"
-    elif prob >= 0.5 or conf < 0.2:
-        return "REVIEW"
-    return "ALLOW"
+        "wallet_age_days": int(wallet_age),
+        "avg_tx": float(np.log1p(df["amount"].mean())),
+        "recent_tx": float(np.log1p(df["amount"].iloc[-1])),
+        "tx_frequency": float(len(df) / wallet_age),
+        "tx_per_min": float(len(df) / (total_seconds / 60)),
+        "tx_per_hour": float(len(df) / (total_seconds / 3600)),
+        "tx_per_day": float(len(df) / (total_seconds / 86400)),
+        "avg_time_between_tx_sec": float(df["time_diff"].mean())
+    }, False
 
 # =============================
 # MAIN SCORER
 # =============================
 def score_wallet(address):
+    total_start = time.time()
+
+    # =============================
+    # DB CHECK
+    # =============================
+    db_start = time.time()
+
+    for token in ["USDT", "USDC"]:
+        features = get_features(address, token)
+
+        if features and token in MODELS:
+            db_time = time.time() - db_start
+            print(f"⚡ CACHE HIT ({token}) → {db_time:.3f}s")
+
+            df_input = pd.DataFrame([features])
+            scaled = SCALERS[token].transform(df_input[FEATURE_COLS[token]])
+
+            prob = MODELS[token].predict_proba(scaled)[0][1]
+            conf = abs(prob - 0.5) * 2
+
+            decision, reason = classify_decision(prob, conf, features)
+
+            print("\n🔥 RESULT (DB)")
+            print(f"Wallet: {address}")
+            print(f"Token: {token}")
+            print(f"Risk: {prob:.4f}")
+            print(f"Decision: {decision}")
+            print(f"Reason: {reason}")
+            print("-" * 40)
+
+            print(f"⏱ TOTAL TIME: {time.time() - total_start:.3f}s")
+            return
+
+    print(f"⚠️ DB MISS ({time.time() - db_start:.3f}s)")
+
+    # =============================
+    # API FETCH
+    # =============================
+    api_start = time.time()
     txs = fetch_transactions(address)
+    print(f"🌐 API TIME: {time.time() - api_start:.3f}s")
 
     if not txs:
-        print("⚠️ No transactions")
+        print("No transactions")
         return
 
     token = detect_token(txs)
 
-    # 🔥 DB lookup
-    features = get_features(address, token)
+    if not token:
+        print("⚠️ Token not detected → defaulting to USDT")
+        token = "USDT"
 
-    if features:
-        print("⚡ CACHE HIT (DB)")
-    else:
-        print("⚠️ Cache miss → computing...")
-        features = generate_features(txs)
+    # =============================
+    # FEATURE GEN
+    # =============================
+    feat_start = time.time()
+    features, low_data = generate_features(txs)
+    print(f"🧠 FEATURE TIME: {time.time() - feat_start:.3f}s")
 
-        if not features:
-            print("⚠️ Not enough data")
-            return
-
+    # =============================
+    # SAVE TO DB
+    # =============================
+    try:
         save_features(address, token, features)
+    except Exception as e:
+        print(f"⚠️ DB save skipped: {e}")
 
-    # 🔥 Network detection
-    net_decision, net_reason = detect_network_patterns(address, txs)
-
-    if net_decision:
-        print("\n🔥 NETWORK RESULT")
-        print(f"Wallet: {address}")
-        print(f"Decision: {net_decision}")
-        print(f"Reason: {net_reason}")
-        print("-" * 40)
+    if low_data:
+        print("Low data → REVIEW")
+        print(f"⏱ TOTAL TIME: {time.time() - total_start:.3f}s")
         return
 
-    # 🔥 ML scoring
+    if token not in MODELS:
+        print(f"⚠️ No model for {token} → REVIEW")
+        print(f"⏱ TOTAL TIME: {time.time() - total_start:.3f}s")
+        return
+
+    # =============================
+    # ML INFERENCE
+    # =============================
     df_input = pd.DataFrame([features])
     scaled = SCALERS[token].transform(df_input[FEATURE_COLS[token]])
 
     prob = MODELS[token].predict_proba(scaled)[0][1]
     conf = abs(prob - 0.5) * 2
 
-    print("\n🔥 ML RESULT")
+    decision, reason = classify_decision(prob, conf, features)
+
+    print("\n🔥 RESULT")
     print(f"Wallet: {address}")
     print(f"Token: {token}")
     print(f"Risk: {prob:.4f}")
-    print(f"Decision: {classify_risk(prob, conf)}")
-    print(f"Confidence: {conf:.4f}")
+    print(f"Decision: {decision}")
+    print(f"Reason: {reason}")
     print("-" * 40)
+
+    print(f"⏱ TOTAL TIME: {time.time() - total_start:.3f}s")
 
 # =============================
 # RUN
 # =============================
 if __name__ == "__main__":
-    print("\n🔥 Wallet Risk Scorer (CLEAN ARCH)")
+    print("🔥 FINAL SYSTEM")
 
     while True:
         w = input("\nWallet: ")

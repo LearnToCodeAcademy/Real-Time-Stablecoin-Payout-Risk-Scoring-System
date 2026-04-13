@@ -10,7 +10,7 @@ BASE_URL = "https://api.etherscan.io/v2/api"
 # =============================
 # 🔥 MODE SWITCH
 # =============================
-MODE = "extract"   # "expand" or "extract"
+MODE = "expand"   # "expand" or "extract"
 
 # =============================
 # CONFIG
@@ -22,8 +22,8 @@ ACTIVE_COINS = {
 
 RUN_ETH = True
 
-MAX_TOTAL_WALLETS = 50000
-MAX_WALLETS_PER_SOURCE = 300
+MAX_TOTAL_WALLETS = 4300
+MAX_WALLETS_PER_SOURCE = 5
 
 MEV_ADDRESS = "0xBdb3ba9ffe392549E1f8658DD2630c141fDF47B6"
 PYUSD_CONTRACT = "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8"
@@ -31,10 +31,10 @@ PYUSD_CONTRACT = "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8"
 SEED_WALLETS = [
     MEV_ADDRESS,
     PYUSD_CONTRACT,
-    "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
+    "0x99e096F18fbFF2808f7388859b387fdD056a3589"
 ]
 
-WALLET_POOL_FILE = "wallet_pool.csv"
+WALLET_POOL_FILE = "wallet_pool_label.csv"
 
 os.makedirs("datasets", exist_ok=True)
 os.makedirs("backups", exist_ok=True)
