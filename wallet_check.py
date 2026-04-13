@@ -3,18 +3,16 @@ import pandas as pd
 import pickle
 import numpy as np
 import time
-import os
-import shutil
 from collections import Counter
 
+# ✅ IMPORT DB FUNCTIONS (IMPORTANT)
+from db import get_features, save_features
+
+# =============================
+# CONFIG
+# =============================
 API_KEY = "HVJKPIBXH53KSZFNTWI9RTEN6EXT9UXK7R"
 BASE_URL = "https://api.etherscan.io/v2/api"
-
-FEATURE_PATH = "features/feature_store.csv"
-BACKUP_DIR = "features/backups"
-
-os.makedirs("features", exist_ok=True)
-os.makedirs(BACKUP_DIR, exist_ok=True)
 
 # =============================
 # LOAD MODELS
@@ -33,42 +31,6 @@ for token, path in TOKENS.items():
         FEATURE_COLS[token] = pickle.load(open(f"{path}_features.pkl", "rb"))
     except:
         print(f"⚠️ Missing model for {token}")
-
-# =============================
-# LOAD FEATURE STORE
-# =============================
-if os.path.exists(FEATURE_PATH):
-    df_store = pd.read_csv(FEATURE_PATH)
-else:
-    df_store = pd.DataFrame()
-
-feature_map = {
-    (row["wallet"], row.get("token", "USDT")): row
-    for _, row in df_store.iterrows()
-}
-
-# =============================
-# BACKUP
-# =============================
-def backup_if_needed():
-    if not os.path.exists(FEATURE_PATH):
-        return
-
-    timestamp = int(time.time())
-    backup_file = f"{BACKUP_DIR}/feature_store_{timestamp}.csv"
-
-    shutil.copy(FEATURE_PATH, backup_file)
-
-    files = sorted(
-        [os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR)],
-        key=os.path.getmtime
-    )
-
-    while len(files) > 6:
-        os.remove(files[0])
-        files.pop(0)
-
-    print("💾 Backup created")
 
 # =============================
 # FETCH TX
@@ -150,36 +112,10 @@ def generate_features(transactions):
     }
 
 # =============================
-# SAVE FEATURE
-# =============================
-def save_feature(wallet, token, features):
-    global df_store, feature_map
-
-    key = (wallet, token)
-
-    features["wallet"] = wallet
-    features["token"] = token
-    features["last_updated"] = int(time.time())
-
-    if key in feature_map:
-        print("⚠️ SKIPPED (exists)")
-        return False
-
-    df_store = pd.concat([df_store, pd.DataFrame([features])])
-    df_store.to_csv(FEATURE_PATH, index=False)
-
-    feature_map[key] = features
-    print("✅ SAVED")
-
-    return True
-
-# =============================
-# 🔥 NETWORK / GRAPH ANALYSIS
+# NETWORK DETECTION
 # =============================
 def detect_network_patterns(address, txs):
-    receivers = []
-    amounts = []
-    timestamps = []
+    receivers, amounts, timestamps = [], [], []
 
     for tx in txs:
         if not isinstance(tx, dict):
@@ -191,42 +127,34 @@ def detect_network_patterns(address, txs):
 
             amount = int(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
             amounts.append(round(amount, 6))
-
             timestamps.append(int(tx["timeStamp"]))
         except:
             continue
 
     unique_receivers = len(set(receivers))
-
-    # 🔥 SAME RECEIVER CLUSTER
     receiver_counts = Counter(receivers)
     top_receiver_freq = max(receiver_counts.values()) if receiver_counts else 0
 
-    # 🔥 SAME AMOUNT PATTERN
     amount_counts = Counter(amounts)
     top_amount_ratio = max(amount_counts.values()) / len(amounts) if amounts else 0
 
-    # 🔥 TIME BURST
     timestamps.sort()
     diffs = np.diff(timestamps) if len(timestamps) > 1 else []
     fast_ratio = sum(d < 15 for d in diffs) / len(diffs) if len(diffs) > 0 else 0
 
-    # =============================
-    # 🚨 GRAPH-LEVEL DETECTION
-    # =============================
     if top_receiver_freq > 20:
-        return "BLOCK", "Clustered transfers to same wallet group"
+        return "BLOCK", "Clustered transfers"
 
     if top_amount_ratio > 0.6 and fast_ratio > 0.4:
-        return "BLOCK", "Coordinated bot-like pattern"
+        return "BLOCK", "Bot-like pattern"
 
     if unique_receivers > 25 and fast_ratio > 0.3:
-        return "REVIEW", "Wide network distribution pattern"
+        return "REVIEW", "Wide network pattern"
 
     return None, None
 
 # =============================
-# ML
+# ML DECISION
 # =============================
 def classify_risk(prob, conf):
     if prob >= 0.8:
@@ -246,12 +174,12 @@ def score_wallet(address):
         return
 
     token = detect_token(txs)
-    key = (address, token)
 
-    if key in feature_map:
-        features = feature_map[key]
-        print("⚡ CACHE HIT")
-        changed = False
+    # 🔥 DB lookup
+    features = get_features(address, token)
+
+    if features:
+        print("⚡ CACHE HIT (DB)")
     else:
         print("⚠️ Cache miss → computing...")
         features = generate_features(txs)
@@ -260,14 +188,9 @@ def score_wallet(address):
             print("⚠️ Not enough data")
             return
 
-        changed = save_feature(address, token, features)
+        save_features(address, token, features)
 
-        if changed:
-            backup_if_needed()
-
-    # =============================
-    # 🔥 NETWORK DETECTION FIRST
-    # =============================
+    # 🔥 Network detection
     net_decision, net_reason = detect_network_patterns(address, txs)
 
     if net_decision:
@@ -278,9 +201,7 @@ def score_wallet(address):
         print("-" * 40)
         return
 
-    # =============================
-    # ML FALLBACK
-    # =============================
+    # 🔥 ML scoring
     df_input = pd.DataFrame([features])
     scaled = SCALERS[token].transform(df_input[FEATURE_COLS[token]])
 
@@ -299,7 +220,7 @@ def score_wallet(address):
 # RUN
 # =============================
 if __name__ == "__main__":
-    print("\n🔥 Wallet Risk Scorer (GRAPH SYSTEM)")
+    print("\n🔥 Wallet Risk Scorer (CLEAN ARCH)")
 
     while True:
         w = input("\nWallet: ")
