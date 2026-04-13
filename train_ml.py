@@ -1,4 +1,3 @@
-
 import pandas as pd
 import numpy as np
 import pickle
@@ -6,12 +5,12 @@ import pickle
 # =============================
 # CONFIG 🔥 (CHANGE TOKEN HERE)
 # =============================
-TOKEN = "usdc"  # change to "usdt"
+TOKEN = "usdt"  # change to "usdt"
 
 SYNTHETIC_PATH = f"datasets/{TOKEN}_training_ready.csv"
 
 LABELED_V1_PATH = f"datasets/{TOKEN}_labeled_auto.csv"
-LABELED_V2_PATH = f"datasets/{TOKEN}_labeled_v2.csv"  # 🔥 optional
+LABELED_V2_PATH = f"datasets/{TOKEN}_labeled_v2.csv"  # optional
 
 MODEL_PATH = f"models/{TOKEN}_model.pkl"
 SCALER_PATH = f"models/{TOKEN}_scaler.pkl"
@@ -21,19 +20,33 @@ FEATURE_PATH = f"models/{TOKEN}_features.pkl"
 # LOAD SYNTHETIC
 # =============================
 df_synth = pd.read_csv(SYNTHETIC_PATH)
+
+# normalize token
+df_synth["token"] = df_synth["token"].str.upper()
+
 print(f"📊 Synthetic rows: {len(df_synth)}")
 
 # =============================
-# LOAD LABELED V1 (HIGH QUALITY)
+# LOAD LABELED V1
 # =============================
 df_v1 = pd.read_csv(LABELED_V1_PATH)
+
 df_v1 = df_v1.dropna(subset=["label"])
 df_v1["label"] = df_v1["label"].astype(int)
+
+# =============================
+# 🔥 ALIGN LABELED DATA (CRITICAL)
+# =============================
+df_v1["token"] = df_v1["token"].str.upper()
+
+# apply SAME transformations as synthetic
+df_v1["avg_tx"] = np.log1p(df_v1["avg_tx"])
+df_v1["recent_tx"] = np.log1p(df_v1["recent_tx"])
 
 print(f"📊 Labeled V1 rows: {len(df_v1)}")
 
 # =============================
-# LOAD LABELED V2 (AUTO LARGE)
+# LOAD LABELED V2 (OPTIONAL)
 # =============================
 USE_V2 = False  # 🔥 TOGGLE HERE
 
@@ -42,10 +55,17 @@ df_v2 = pd.DataFrame()
 if USE_V2:
     try:
         df_v2 = pd.read_csv(LABELED_V2_PATH)
+
         df_v2 = df_v2.dropna(subset=["label"])
         df_v2["label"] = df_v2["label"].astype(int)
 
+        # align format
+        df_v2["token"] = df_v2["token"].str.upper()
+        df_v2["avg_tx"] = np.log1p(df_v2["avg_tx"])
+        df_v2["recent_tx"] = np.log1p(df_v2["recent_tx"])
+
         print(f"📊 Labeled V2 rows: {len(df_v2)}")
+
     except Exception as e:
         print(f"⚠️ Failed loading V2: {e}")
 
@@ -77,9 +97,9 @@ y = df["label"]
 # WEIGHTS 🔥
 # =============================
 weights = np.concatenate([
-    np.ones(len(df_synth)),          # synthetic → 1x
-    np.ones(len(df_v1)) * 5,         # V1 → strong truth 🔥
-    np.ones(len(df_v2)) * 2 if USE_V2 else np.array([])  # V2 → weaker
+    np.ones(len(df_synth)),                 # synthetic → 1x
+    np.ones(len(df_v1)) * 5,                # V1 → strong truth
+    np.ones(len(df_v2)) * 2 if USE_V2 else np.array([])
 ])
 
 print("⚖️ Weights:")

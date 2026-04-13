@@ -7,8 +7,8 @@ import time
 # =============================
 # CONFIG
 # =============================
-INPUT_CSV = "one_checker_output.csv"
-OUTPUT_CSV = "datasets/usdt_labeled_auto.csv"
+INPUT_CSV = "wallet_pool.csv"
+OUTPUT_CSV = "datasets/usdt_labeled_auto_v2.csv"
 
 KEYWORDS = ["phish", "scam", "spam", "hack", "exploit", "malicious"]
 
