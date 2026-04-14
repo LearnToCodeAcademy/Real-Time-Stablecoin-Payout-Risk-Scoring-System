@@ -1,3 +1,4 @@
+import os
 import requests
 import pandas as pd
 import pickle
@@ -11,24 +12,34 @@ from db import get_features, save_features
 # =============================
 API_KEY = "HVJKPIBXH53KSZFNTWI9RTEN6EXT9UXK7R"
 BASE_URL = "https://api.etherscan.io/v2/api"
+MODEL_DIR = "models"
+SUPPORTED_TOKENS = ["USDT", "USDC", "BUSD", "DAI", "USDP", "TUSD"]
 
 # =============================
 # LOAD MODELS
 # =============================
 MODELS, SCALERS, FEATURE_COLS = {}, {}, {}
 
-TOKENS = {
-    "USDT": "models/usdt",
-    "USDC": "models/usdc"
-}
+for token in SUPPORTED_TOKENS:
+    prefix = os.path.join(MODEL_DIR, token.lower())
+    model_path = f"{prefix}_model.pkl"
+    scaler_path = f"{prefix}_scaler.pkl"
+    features_path = f"{prefix}_features.pkl"
 
-for token, path in TOKENS.items():
-    try:
-        MODELS[token] = pickle.load(open(f"{path}_model.pkl", "rb"))
-        SCALERS[token] = pickle.load(open(f"{path}_scaler.pkl", "rb"))
-        FEATURE_COLS[token] = pickle.load(open(f"{path}_features.pkl", "rb"))
-    except:
-        print(f"⚠️ Missing model for {token}")
+    if os.path.exists(model_path) and os.path.exists(scaler_path) and os.path.exists(features_path):
+        try:
+            MODELS[token] = pickle.load(open(model_path, "rb"))
+            SCALERS[token] = pickle.load(open(scaler_path, "rb"))
+            FEATURE_COLS[token] = pickle.load(open(features_path, "rb"))
+        except Exception as e:
+            print(f"⚠️ Failed to load {token} model: {e}")
+    else:
+        print(f"⚠️ Missing files for {token} model; expected {model_path}, {scaler_path}, {features_path}")
+
+if MODELS:
+    print(f"✅ Loaded token models: {', '.join(sorted(MODELS.keys()))}")
+else:
+    print("⚠️ No token models loaded. Wallet scoring will require model files in models/*_model.pkl.")
 
 # =============================
 # DECISION ENGINE (3-CLASS)
@@ -83,11 +94,14 @@ def fetch_transactions(address):
 # =============================
 def detect_token(transactions):
     counts = {}
+    supported = list(MODELS.keys()) if MODELS else SUPPORTED_TOKENS
 
     for tx in transactions:
         if isinstance(tx, dict):
             sym = tx.get("tokenSymbol")
-            if sym in ["USDT", "USDC"]:
+            if isinstance(sym, str):
+                sym = sym.upper().strip()
+            if sym in supported:
                 counts[sym] = counts.get(sym, 0) + 1
 
     return max(counts, key=counts.get) if counts else None
@@ -141,6 +155,36 @@ def generate_features(transactions):
         "avg_time_between_tx_sec": float(df["time_diff"].mean())
     }, False
 
+
+# =============================
+# ML PROBABILITY HELPERS
+# =============================
+def get_token_probabilities(model, scaled):
+    probs = model.predict_proba(scaled)[0]
+    class_index = {cls: idx for idx, cls in enumerate(model.classes_)}
+
+    prob_normal = float(probs[class_index[0]]) if 0 in class_index else 0.0
+    prob_malicious = float(probs[class_index[1]]) if 1 in class_index else 0.0
+    prob_poisoned = float(probs[class_index[2]]) if 2 in class_index else 0.0
+
+    return prob_normal, prob_malicious, prob_poisoned
+
+
+def align_features_for_token(token, features):
+    """Return input DataFrame with expected model columns for the given token."""
+    feature_cols = FEATURE_COLS.get(token)
+    df_input = pd.DataFrame([features])
+
+    if feature_cols is None:
+        return df_input
+
+    for col in feature_cols:
+        if col not in df_input.columns:
+            df_input[col] = 0
+
+    return df_input[feature_cols]
+
+
 # =============================
 # MAIN SCORER
 # =============================
@@ -152,32 +196,21 @@ def score_wallet(address):
     # =============================
     db_start = time.time()
 
-    for token in ["USDT", "USDC"]:
+    for token in MODELS:
         features = get_features(address, token)
 
-        if features and token in MODELS:
+        if features is not None and token in MODELS:
             db_time = time.time() - db_start
             print(f"⚡ CACHE HIT ({token}) → {db_time:.3f}s")
 
-            df_input = pd.DataFrame([features])
-            scaled = SCALERS[token].transform(df_input[FEATURE_COLS[token]])
+            df_input = align_features_for_token(token, features)
+            try:
+                scaled = SCALERS[token].transform(df_input)
+            except Exception as e:
+                print(f"⚠️ Cached inference failed for {token}: {e}. Skipping.")
+                continue
 
-            probs = MODELS[token].predict_proba(scaled)[0]
-            num_classes = len(probs)
-            
-            # 🔥 Handle both 2-class and 3-class models
-            if num_classes == 3:
-                prob_normal = probs[0]
-                prob_malicious = probs[1]
-                prob_poisoned = probs[2]
-            elif num_classes == 2:
-                prob_normal = probs[0]
-                prob_malicious = probs[1]
-                prob_poisoned = 0.0  # No poisoned class
-            else:
-                print(f"⚠️ Unexpected class count: {num_classes}")
-                return
-            
+            prob_normal, prob_malicious, prob_poisoned = get_token_probabilities(MODELS[token], scaled)
             risk_prob = max(prob_malicious, prob_poisoned)
             conf = abs(risk_prob - 0.5) * 2
 
@@ -215,6 +248,8 @@ def score_wallet(address):
         print("⚠️ Token not detected → defaulting to USDT")
         token = "USDT"
 
+    print(f"MOST USE TOKEN: {token}")
+
     # =============================
     # FEATURE GEN
     # =============================
@@ -231,37 +266,33 @@ def score_wallet(address):
         print(f"⚠️ DB save skipped: {e}")
 
     if low_data:
+        decision, reason = "REVIEW", "Insufficient transaction data"
         print("Low data → REVIEW")
+        print(f"Decision: {decision}")
+        print(f"Reason: {reason}")
         print(f"⏱ TOTAL TIME: {time.time() - total_start:.3f}s")
         return
 
     if token not in MODELS:
+        decision, reason = "REVIEW", "No model available for detected token"
         print(f"⚠️ No model for {token} → REVIEW")
+        print(f"Decision: {decision}")
+        print(f"Reason: {reason}")
         print(f"⏱ TOTAL TIME: {time.time() - total_start:.3f}s")
         return
 
     # =============================
     # ML INFERENCE (3-CLASS)
     # =============================
-    df_input = pd.DataFrame([features])
-    scaled = SCALERS[token].transform(df_input[FEATURE_COLS[token]])
-
-    probs = MODELS[token].predict_proba(scaled)[0]
-    num_classes = len(probs)
-    
-    # 🔥 Handle both 2-class and 3-class models
-    if num_classes == 3:
-        prob_normal = probs[0]
-        prob_malicious = probs[1]
-        prob_poisoned = probs[2]
-    elif num_classes == 2:
-        prob_normal = probs[0]
-        prob_malicious = probs[1]
-        prob_poisoned = 0.0  # No poisoned class
-    else:
-        print(f"⚠️ Unexpected class count: {num_classes}")
+    df_input = align_features_for_token(token, features)
+    try:
+        scaled = SCALERS[token].transform(df_input)
+    except Exception as e:
+        print(f"⚠️ Model inference failed for {token}: {e}. REVIEW")
+        print(f"⏱ TOTAL TIME: {time.time() - total_start:.3f}s")
         return
-    
+
+    prob_normal, prob_malicious, prob_poisoned = get_token_probabilities(MODELS[token], scaled)
     risk_prob = max(prob_malicious, prob_poisoned)
     conf = abs(risk_prob - 0.5) * 2
 

@@ -1,65 +1,243 @@
 MULTI-TOKEN PIPELINE (USDT, USDC, BUSD, DAI, USDP, TUSD)
 =========================================================
 
-🔥 STEP 1: RUN MAIN.PY (ONE TIME)
-main.py → Generates all token CSVs:
-  - v0_usdt.csv, v0_usdc.csv, v0_busd.csv, etc.
-  - v1_usdt.csv, v1_usdc.csv, v1_busd.csv, etc.
-  - v2_usdt.csv, v2_usdc.csv, v2_busd.csv, etc.
-  - v3_raw_usdt.csv, v3_raw_usdc.csv, v3_raw_busd.csv, etc.
+🔥 UPDATED ARCHITECTURE (as of April 14, 2026)
+=========================================================
+
+main.py now has 3 modes:
+  1. MODE_RUN = "expand"   → Expand wallet pools from seeds
+  2. MODE_RUN = "extract"  → Extract features from existing pools
+  3. MODE_RUN = "dual"     → Expand THEN extract (full pipeline in one run)
+
+Per-version seeds (not shared):
+  SEEDS_V0 = [...]  # Edit these at top of main.py
+  SEEDS_V1 = [...]
+  SEEDS_V2 = [...]
+  SEEDS_V3 = [...]
+
+Etherscan keyword scraping is built into main.py:
+  ✅ V1/V2 auto-labeled during extraction (no auto_assign_v1_v2.py needed)
+  ✅ Scrapes for keywords: ["phish", "scam", "spam", "hack", "exploit", "malicious"]
 
 =========================================================
-🔥 STEP 2: RUN PER-TOKEN SCRIPTS (LOOP THROUGH EACH TOKEN)
+🔥 STEP 1: EDIT MAIN.PY CONFIGURATION
+=========================================================
+
+At the top of main.py:
+
+1. Set your seeds (one per version):
+   SEEDS_V0 = ["0xYourWalletHere"]
+   SEEDS_V1 = ["0xSuspiciousWallet"]
+   SEEDS_V2 = ["0xMaliciousWallet1", "0xMaliciousWallet2"]
+   SEEDS_V3 = ["0xPoisoningWallet"]
+
+2. Enable versions you want:
+   ENABLE_V0 = True   # Baseline safe wallets
+   ENABLE_V1 = True   # Manual malicious (with Etherscan auto-label)
+   ENABLE_V2 = False  # Scaled malicious (expensive, 5min timeout)
+   ENABLE_V3 = False  # Poisoning detection
+   ENABLE_V4 = False  # High-confidence safe wallets (generated from cleaned V0 training data)
+
+3. Choose mode:
+   MODE_RUN = "dual"  # Recommended: expand then extract in one run
+
+=========================================================
+🔥 STEP 2: RUN MAIN.PY
+=========================================================
+
+Command:
+  python main.py
+
+What it does (in "dual" mode):
+  1. Expands wallet pools from SEEDS:
+     → v0_wallet_pool.csv (or v0_T1wallet_pool.csv if exists)
+     → v1_wallet_pool.csv
+     → etc.
+  
+  2. Extracts features per token (uses new pool):
+     → v0_usdt.csv, v0_usdc.csv, ... (label=0 for V0)
+     → v1_usdt.csv, v1_usdc.csv, ... (label=1 if keyword found, else None)
+     → v2_usdt.csv, v2_usdc.csv, ... (label=1 if keyword found, else None)
+     → v3_usdt.csv, v3_usdc.csv, ... (label=2 if poisoned, else -1)
+
+Pool files (auto-versioned):
+  - If v0_wallet_pool.csv exists → creates v0_T1wallet_pool.csv
+  - If v0_T1wallet_pool.csv exists → creates v0_T2wallet_pool.csv
+  - etc. (prevents overwriting old pools)
+
+NOTE: Expand vs Extract file naming
+  - Expand saves pool files using POOL_FILES:
+      v0_wallet_pool.csv, v1_wallet_pool.csv, v2_wallet_pool.csv, v3_wallet_pool.csv
+      and additional versions as needed:
+      v0_T1wallet_pool.csv, v0_T2wallet_pool.csv, v1_T1wallet_pool.csv, v1_T2wallet_pool.csv, ...
+  - Extract uses those pool files when use_pool=True and writes per-token CSVs:
+      datasets/v0_usdt.csv, datasets/v0_usdc.csv, datasets/v0_busd.csv, datasets/v0_dai.csv, datasets/v0_usdp.csv, datasets/v0_tusd.csv
+      datasets/v1_usdt.csv, datasets/v1_usdc.csv, datasets/v1_busd.csv, datasets/v1_dai.csv, datasets/v1_usdp.csv, datasets/v1_tusd.csv
+
+=========================================================
+🔥 STEP 3: RUN PER-TOKEN PREPROCESSING (CLEANER ONLY)
 =========================================================
 
 For each TOKEN in [usdt, usdc, busd, dai, usdp, tusd]:
 
-V0 (BASELINE):
-  1. cleaner.py (set TOKEN = "usdt" at top)
-     v0_usdt.csv → usdt_training_ready.csv
-  
-V1 (HIGH-TRUST MALICIOUS):
-  2. auto_assign_V1_V2.py (set TOKEN = "usdt", VERSION = "v1")
-     v1_usdt.csv → usdt_labeled_auto.csv
-  
-V2 (SCALED MALICIOUS):
-  3. auto_assign_V1_V2.py (set TOKEN = "usdt", VERSION = "v2")
-     v2_usdt.csv → usdt_labeled_v2.csv
-  
-V3 (POISONING BEHAVIOR):
-  4. v3_processor.py (set TOKEN = "usdt")
-     v3_raw_usdt.csv → usdt_labeled_v3.csv
-  
+  cleaner.py (set TOKEN = "usdt" at top)
+    v0_usdt.csv → usdt_training_ready.csv
+
+Note: 
+  - auto_assign_V1_V2.py NO LONGER NEEDED (Etherscan scraping built into main.py)
+  - v3_processor.py NO LONGER NEEDED (V3 raw/clean/labeled outputs are now generated inside main.py)
+  - v4_script.py NO LONGER NEEDED if ENABLE_V4 is used in main.py
+
+=========================================================
+🔥 STEP 4: CREATE COMBINED TRAINING CSV (OPTIONAL)
+=========================================================
+
+If you want V1/V2/V3/V4 labels, run the remaining preprocessing:
+
+V3 (POISONING FEATURES - if you want detailed poison cols):
+  v3_processor.py (set TOKEN = "usdt")
+    v3_usdt.csv → usdt_labeled_v3.csv
+
 V4 (HIGH-CONFIDENCE SAFE):
-  5. v4_script.py (set TOKEN = "usdt")
-     usdt_training_ready.csv → usdt_labeled_v4.csv
+  v4_script.py (set TOKEN = "usdt")
+    usdt_training_ready.csv → usdt_labeled_v4.csv
 
 =========================================================
-🔥 STEP 3: TRAIN MODEL (PER TOKEN)
+🔥 STEP 5: TRAIN MODEL (BATCH MODE)
 =========================================================
 
-train_ml.py (set TOKEN = "usdt" at top)
-  Combines: usdt_training_ready.csv + usdt_labeled_auto.csv + 
-            usdt_labeled_v2.csv + usdt_labeled_v3.csv + usdt_labeled_v4.csv
-  Outputs: usdt_model.pkl, usdt_scaler.pkl, usdt_features.pkl
+train_ml.py with TOKEN = "all":
+  
+  Set at top:
+    TOKEN = "all"
+  
+  Command:
+    python train_ml.py
+  
+  Trains all 6 tokens in sequence:
+    → usdt_model.pkl, usdt_scaler.pkl, usdt_features.pkl
+    → usdc_model.pkl, usdc_scaler.pkl, usdc_features.pkl
+    → ... (for all 6 tokens)
 
 =========================================================
-🔥 INFERENCE
+🔥 STEP 6: INFERENCE
 =========================================================
 
-wallet_check.py
-  - Auto-detects token from wallet transactions
-  - Loads appropriate model (usdt_model, usdc_model, etc.)
-  - Scores wallet in real-time
+wallet_check.py:
+  - Load all 6 token-specific models
+  - Auto-detect token from wallet transactions
+  - Score wallet risk in real-time
+  - Outputs: Normal / Malicious / Poisoned
 
 =========================================================
-AUTOMATION SCRIPT (run_pipeline.py - optional)
+QUICK REFERENCE: FEATURE COLUMNS
 =========================================================
 
-for token in ["usdt", "usdc", "busd", "dai", "usdp", "tusd"]:
-    os.system(f"python cleaner.py {token}")
-    os.system(f"python auto_assign_V1_V2.py {token} v1")
-    os.system(f"python auto_assign_V1_V2.py {token} v2")
-    os.system(f"python v3_processor.py {token}")
-    os.system(f"python v4_script.py {token}")
-    os.system(f"python train_ml.py {token}")
+All CSVs include:
+  wallet, wallet_age_days, avg_tx, recent_tx, tx_frequency,
+  tx_per_min, tx_per_hour, tx_per_day, avg_time_between_tx_sec, label
+
+V3 additional columns (if poisoning analysis):
+  dust_tx_ratio, similarity_hits, new_sender_ratio, is_poisoned_pattern
+
+=========================================================
+TROUBLESHOOTING
+=========================================================
+
+Q: "Why does main.py stop at iteration 2?"
+A: 5-minute timeout per version. Edit max_duration in expand_wallets()
+
+Q: "How do I resume expansion?"
+A: Set MODE_RUN = "extract" to skip expansion and use existing pools
+
+Q: "Can I use old pools?"
+A: Yes, load_pool() auto-discovers _vN versioned files
+
+Q: "Etherscan scraping is slow"
+A: That's normal (1s delay per wallet). It's ~1 hour for 1000 wallets
+
+=========================================================
+RECOMMENDED WORKFLOW
+=========================================================
+
+1. Edit main.py (seeds + MODE_RUN = "dual")
+2. python main.py (expand + extract auto-labels V1/V2)
+3. python cleaner.py (per token, TOKEN = "usdt" etc)
+4. python train_ml.py (with TOKEN = "all")
+5. Use wallet_check.py for inference
+
+=========================================================
+FILE FLOWCHART BY VERSION
+=========================================================
+
+V0 (BASELINE SAFE):
+  main.py (expand_wallets + extract)
+    ↓
+  v0_usdt.csv (label=0, per token)
+    ↓
+  cleaner.py (per token)
+    ↓
+  usdt_training_ready.csv
+    ↓
+  train_ml.py (TOKEN="all")
+    ↓
+  usdt_model.pkl → wallet_check.py
+
+V1 (MANUAL MALICIOUS):
+  main.py (expand_wallets from SEEDS_V1)
+    ↓
+  v1_wallet_pool.csv
+    ↓
+  main.py (extract + Etherscan scraping)
+    ↓
+  v1_usdt.csv (label=1 if keyword, else None, per token)
+    ↓
+  train_ml.py (TOKEN="all")
+    ↓
+  usdt_model.pkl → wallet_check.py
+
+V2 (SCALED MALICIOUS):
+  main.py (expand_wallets from SEEDS_V2, 50K+ wallets)
+    ↓
+  v2_wallet_pool.csv
+    ↓
+  main.py (extract + Etherscan scraping)
+    ↓
+  v2_usdt.csv (label=1 if keyword, else None, per token)
+    ↓
+  train_ml.py (TOKEN="all")
+    ↓
+  usdt_model.pkl → wallet_check.py
+
+V3 (POISONING DETECTION):
+  main.py (expand_wallets from SEEDS_V3)
+    ↓
+  v3_wallet_pool.csv
+    ↓
+  main.py (extract + compute_v3_features)
+    ↓
+  v3_usdt.csv (label=2 if poisoning, else -1, per token)
+    ↓
+  v3_processor.py (optional, for detailed analysis)
+    ↓
+  usdt_labeled_v3.csv
+    ↓
+  train_ml.py (TOKEN="all")
+    ↓
+  usdt_model.pkl → wallet_check.py
+
+COMBINED TRAINING (OPTIONAL):
+  usdt_training_ready.csv (V0)
+    ↓
+  + v1_usdt.csv (V1 with Etherscan labels)
+  + v2_usdt.csv (V2 with Etherscan labels)
+  + v3_usdt.csv (V3 with poisoning labels)
+  + usdt_labeled_v4.csv (V4 safe wallets)
+    ↓
+  merge_datasets.py (custom, if needed)
+    ↓
+  usdt_combined_training.csv
+    ↓
+  train_ml.py (with combined CSV)
+    ↓
+  usdt_model_combined.pkl

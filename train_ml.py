@@ -7,11 +7,9 @@ import os
 # CONFIG 🔥 MULTI-TOKEN
 # =============================
 TOKEN = "all"  # 🔥 Change to: "all" (train all tokens) or specific token: "usdt", "usdc", "busd", "dai", "usdp", "tusd"
-
-# Training data versions to use
-USE_V2 = True
-USE_V3 = True
-USE_V4 = True
+TRAIN_ESTIMATORS = 150
+TRAIN_MAX_DEPTH = 14
+TRAIN_N_JOBS = 1
 
 # Available tokens
 AVAILABLE_TOKENS = ["usdt", "usdc", "busd", "dai", "usdp", "tusd"]
@@ -42,6 +40,13 @@ def load_dataset(path, log_transform=True):
     except Exception as e:
         print(f"⚠️ Failed loading {path}: {e}")
         return pd.DataFrame()
+
+
+def load_dataset_with_info(path, log_transform=True):
+    df = load_dataset(path, log_transform=log_transform)
+    if os.path.exists(path) and df.empty:
+        print(f"⚠️ {os.path.basename(path)} exists but contains no valid labeled rows and will be skipped.")
+    return df
 
 # =============================
 # FEATURES CONSISTENCY
@@ -78,28 +83,48 @@ def train_token_model(token):
     print(f"{'='*60}")
     
     # Build file paths
-    SYNTHETIC_PATH = f"datasets/{token}_training_ready.csv"
-    V1_PATH = f"datasets/{token}_labeled_auto.csv"
-    V2_PATH = f"datasets/{token}_labeled_v2.csv"
-    V3_PATH = f"datasets/{token}_labeled_v3.csv"
-    V4_PATH = f"datasets/{token}_labeled_v4.csv"
+    SYNTHETIC_PATH = f"datasets/{token}_training_ready.csv"  # from cleaner.py
+    V1_PATH = f"datasets/v1_{token}.csv"  # from main.py extract (Etherscan auto-labeled)
+    V2_PATH = f"datasets/v2_{token}.csv"  # from main.py extract (Etherscan auto-labeled)
+    V3_PATH = f"datasets/v3_{token}.csv"  # from main.py extract (poisoning detected)
+    V4_PATH = f"datasets/{token}_labeled_v4.csv"  # from v4_script.py (safe wallets)
     
     MODEL_PATH = f"models/{token}_model.pkl"
     SCALER_PATH = f"models/{token}_scaler.pkl"
     FEATURE_PATH = f"models/{token}_features.pkl"
     
-    # Load datasets
-    df_synth = load_dataset(SYNTHETIC_PATH)
-    df_v1 = load_dataset(V1_PATH)
-    df_v2 = load_dataset(V2_PATH) if USE_V2 else pd.DataFrame()
-    df_v3 = load_dataset(V3_PATH, log_transform=False) if USE_V3 else pd.DataFrame()
-    df_v4 = load_dataset(V4_PATH, log_transform=False) if USE_V4 else pd.DataFrame()
+    # Check which files exist
+    missing_versions = []
+    version_files = {
+        "V0 (Synthetic)": SYNTHETIC_PATH,
+        "V1 (Manual/Auto)": V1_PATH,
+        "V2 (Scaled Auto)": V2_PATH,
+        "V3 (Poisoned)": V3_PATH,
+        "V4 (Safe)": V4_PATH
+    }
     
-    print(f"📊 V0 (synthetic): {len(df_synth)}")
-    print(f"📊 V1 (manual/auto): {len(df_v1)}")
-    print(f"📊 V2 (scaled auto): {len(df_v2)}")
-    print(f"📊 V3 (poisoned): {len(df_v3)}")
-    print(f"📊 V4 (safe): {len(df_v4)}")
+    for version_name, version_path in version_files.items():
+        if not os.path.exists(version_path):
+            missing_versions.append(version_name)
+    
+    if missing_versions:
+        print(f"\n⚠️ MISSING VERSIONS:")
+        for missing in missing_versions:
+            print(f"   - {missing}")
+    
+    # Load datasets
+    df_synth = load_dataset_with_info(SYNTHETIC_PATH) if os.path.exists(SYNTHETIC_PATH) else pd.DataFrame()
+    df_v1 = load_dataset_with_info(V1_PATH) if os.path.exists(V1_PATH) else pd.DataFrame()
+    df_v2 = load_dataset_with_info(V2_PATH, log_transform=False) if os.path.exists(V2_PATH) else pd.DataFrame()
+    df_v3 = load_dataset_with_info(V3_PATH, log_transform=False) if os.path.exists(V3_PATH) else pd.DataFrame()
+    df_v4 = load_dataset_with_info(V4_PATH, log_transform=False) if os.path.exists(V4_PATH) else pd.DataFrame()
+    
+    print(f"\n📊 DATA LOADED:")
+    print(f"   - V0 (synthetic): {len(df_synth)} rows")
+    print(f"   - V1 (manual/auto): {len(df_v1)} rows")
+    print(f"   - V2 (scaled auto): {len(df_v2)} rows")
+    print(f"   - V3 (poisoned): {len(df_v3)} rows")
+    print(f"   - V4 (safe): {len(df_v4)} rows")
     
     # Remove unused columns
     DROP_COLS = ["prediction", "confidence", "decision", "risk_probability"]
@@ -117,28 +142,53 @@ def train_token_model(token):
     df = pd.concat([df_synth, df_v1, df_v2, df_v3, df_v4], ignore_index=True)
     print(f"\n📊 TOTAL TRAINING ROWS: {len(df)}")
     
+    # Check if we have enough data
+    if len(df) == 0:
+        print(f"\n❌ ERROR: No training data available for {token.upper()}")
+        print(f"   At least V1 (manual/auto) data is required for training.")
+        return
+    
     # Features and labels
     X = df[ALL_FEATURES]
     y = df["label"]
     
-    # Smart weighting
-    weights = np.concatenate([
-        np.ones(len(df_synth)) * 0.8,
-        np.ones(len(df_v1)) * 6.0,
-        np.ones(len(df_v2)) * 2.5 if USE_V2 else np.array([]),
-        np.ones(len(df_v3)) * 4.0 if USE_V3 else np.array([]),
-        np.ones(len(df_v4)) * 3.0 if USE_V4 else np.array([])
-    ])
+    class_counts = y.value_counts().to_dict()
+    print("\n🧠 LABEL DISTRIBUTION:")
+    for cls, count in class_counts.items():
+        print(f"   - {cls}: {count}")
     
-    print("\n⚖️ Weights (PRIORITIZED):")
-    print(f" - V0 synthetic: {len(df_synth)} (0.8x)")
-    print(f" - V1 manual: {len(df_v1)} (6.0x)")
-    if USE_V2:
-        print(f" - V2 auto: {len(df_v2)} (2.5x)")
-    if USE_V3:
-        print(f" - V3 poisoned: {len(df_v3)} (4.0x)")
-    if USE_V4:
-        print(f" - V4 safe: {len(df_v4)} (3.0x)")
+    if len(class_counts) < 2:
+        print(f"\n❌ ERROR: Not enough label classes for {token.upper()} training")
+        print("   Need at least 2 label classes. Skipping this token.")
+        return
+    
+    # Smart weighting - dynamically build based on what's available
+    weights = []
+    
+    if len(df_synth) > 0:
+        weights.extend(np.ones(len(df_synth)) * 0.8)
+    if len(df_v1) > 0:
+        weights.extend(np.ones(len(df_v1)) * 6.0)
+    if len(df_v2) > 0:
+        weights.extend(np.ones(len(df_v2)) * 2.5)
+    if len(df_v3) > 0:
+        weights.extend(np.ones(len(df_v3)) * 4.0)
+    if len(df_v4) > 0:
+        weights.extend(np.ones(len(df_v4)) * 3.0)
+    
+    weights = np.array(weights)
+    
+    print("\n⚖️ WEIGHTS (PRIORITIZED):")
+    if len(df_synth) > 0:
+        print(f"   - V0 (synthetic): {len(df_synth)} rows (0.8x)")
+    if len(df_v1) > 0:
+        print(f"   - V1 (manual): {len(df_v1)} rows (6.0x)")
+    if len(df_v2) > 0:
+        print(f"   - V2 (auto): {len(df_v2)} rows (2.5x)")
+    if len(df_v3) > 0:
+        print(f"   - V3 (poisoned): {len(df_v3)} rows (4.0x)")
+    if len(df_v4) > 0:
+        print(f"   - V4 (safe): {len(df_v4)} rows (3.0x)")
     
     # Scale features
     from sklearn.preprocessing import StandardScaler
@@ -148,15 +198,19 @@ def train_token_model(token):
     # Train model
     from sklearn.ensemble import RandomForestClassifier
     model = RandomForestClassifier(
-        n_estimators=300,
-        max_depth=14,
+        n_estimators=TRAIN_ESTIMATORS,
+        max_depth=TRAIN_MAX_DEPTH,
         min_samples_split=5,
         class_weight="balanced",
         random_state=42,
-        n_jobs=-1
+        n_jobs=TRAIN_N_JOBS
     )
     
-    model.fit(X_scaled, y, sample_weight=weights)
+    try:
+        model.fit(X_scaled, y, sample_weight=weights)
+    except Exception as e:
+        print(f"\n❌ ERROR: Failed training {token.upper()} model: {e}")
+        return
     
     # Save model
     os.makedirs("models", exist_ok=True)
@@ -170,10 +224,17 @@ def train_token_model(token):
     sample = X.iloc[0:1]
     probs = model.predict_proba(scaler.transform(sample))[0]
     
+    class_names = {
+        0: "Normal",
+        1: "Malicious",
+        2: "Poisoned",
+        -1: "Unknown"
+    }
+
     print("\n🔥 Sample Prediction:")
-    print(f"Normal: {probs[0]:.4f}")
-    print(f"Malicious: {probs[1]:.4f}")
-    print(f"Poisoned: {probs[2]:.4f}")
+    for cls, prob in zip(model.classes_, probs):
+        label = class_names.get(cls, f"Class {cls}")
+        print(f"{label}: {prob:.4f}")
     print()
 
 # =============================
@@ -185,9 +246,13 @@ if __name__ == "__main__":
         print("🔥 TRAINING ALL TOKENS")
         print("="*60)
         for token in AVAILABLE_TOKENS:
-            train_token_model(token)
+            try:
+                train_token_model(token)
+            except Exception as e:
+                print(f"\n❌ ERROR: {token.upper()} model failed with exception: {e}")
+                continue
         print("\n" + "="*60)
-        print("✅ ALL TOKENS TRAINED")
+        print("✅ ALL TOKENS DONE")
         print("="*60)
     else:
         train_token_model(TOKEN.lower())
