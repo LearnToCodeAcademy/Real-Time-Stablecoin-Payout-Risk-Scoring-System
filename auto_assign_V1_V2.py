@@ -5,11 +5,13 @@ import time
 import os
 
 # =============================
-# 🔥 CONFIG (CHANGE THIS PER RUN)
+# 🔥 CONFIG (MULTI-TOKEN)
 # =============================
+TOKEN = "usdt"      # 🔥 Change to: usdt, usdc, busd, dai, usdp, tusd
+VERSION = "v2"      # 🔥 Change to: v1 or v2
 
-INPUT_CSV = "datasets/v2.csv"              # 🔥 change to v1.csv or v2.csv
-OUTPUT_CSV = "datasets/v2_labeled_auto.csv"
+INPUT_CSV = f"datasets/{VERSION}_{TOKEN.lower()}.csv"
+OUTPUT_CSV = f"datasets/{TOKEN.lower()}_labeled_{VERSION}.csv"  # v1→auto, v2→v2
 
 SAVE_EVERY = 25        # autosave every N wallets
 SLEEP = 1.2            # avoid rate limit

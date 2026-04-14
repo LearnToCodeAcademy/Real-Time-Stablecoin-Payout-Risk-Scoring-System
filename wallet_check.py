@@ -31,9 +31,9 @@ for token, path in TOKENS.items():
         print(f"⚠️ Missing model for {token}")
 
 # =============================
-# DECISION ENGINE
+# DECISION ENGINE (3-CLASS)
 # =============================
-def classify_decision(prob, conf, features, low_data=False):
+def classify_decision(prob_malicious, prob_poisoned, conf, features, low_data=False):
     if low_data:
         return "REVIEW", "Insufficient data"
 
@@ -46,11 +46,16 @@ def classify_decision(prob, conf, features, low_data=False):
     if conf < 0.3:
         return "REVIEW", "Low confidence"
 
-    if prob >= 0.8:
-        return "BLOCK", "High risk"
+    # 🔥 POISONING IS HIGHEST PRIORITY
+    if prob_poisoned >= 0.5:
+        return "BLOCK", "Poisoned wallet (address spoofing)"
 
-    elif prob >= 0.5:
-        return "REVIEW", "Moderate risk"
+    # 🔥 THEN MALICIOUS
+    if prob_malicious >= 0.8:
+        return "BLOCK", "High malicious risk"
+
+    elif prob_malicious >= 0.5:
+        return "REVIEW", "Moderate malicious risk"
 
     return "ALLOW", "Low risk"
 
@@ -157,15 +162,33 @@ def score_wallet(address):
             df_input = pd.DataFrame([features])
             scaled = SCALERS[token].transform(df_input[FEATURE_COLS[token]])
 
-            prob = MODELS[token].predict_proba(scaled)[0][1]
-            conf = abs(prob - 0.5) * 2
+            probs = MODELS[token].predict_proba(scaled)[0]
+            num_classes = len(probs)
+            
+            # 🔥 Handle both 2-class and 3-class models
+            if num_classes == 3:
+                prob_normal = probs[0]
+                prob_malicious = probs[1]
+                prob_poisoned = probs[2]
+            elif num_classes == 2:
+                prob_normal = probs[0]
+                prob_malicious = probs[1]
+                prob_poisoned = 0.0  # No poisoned class
+            else:
+                print(f"⚠️ Unexpected class count: {num_classes}")
+                return
+            
+            risk_prob = max(prob_malicious, prob_poisoned)
+            conf = abs(risk_prob - 0.5) * 2
 
-            decision, reason = classify_decision(prob, conf, features)
+            decision, reason = classify_decision(prob_malicious, prob_poisoned, conf, features)
 
             print("\n🔥 RESULT (DB)")
             print(f"Wallet: {address}")
             print(f"Token: {token}")
-            print(f"Risk: {prob:.4f}")
+            print(f"Normal: {prob_normal:.4f}")
+            print(f"Malicious: {prob_malicious:.4f}")
+            print(f"Poisoned: {prob_poisoned:.4f}")
             print(f"Decision: {decision}")
             print(f"Reason: {reason}")
             print("-" * 40)
@@ -218,20 +241,38 @@ def score_wallet(address):
         return
 
     # =============================
-    # ML INFERENCE
+    # ML INFERENCE (3-CLASS)
     # =============================
     df_input = pd.DataFrame([features])
     scaled = SCALERS[token].transform(df_input[FEATURE_COLS[token]])
 
-    prob = MODELS[token].predict_proba(scaled)[0][1]
-    conf = abs(prob - 0.5) * 2
+    probs = MODELS[token].predict_proba(scaled)[0]
+    num_classes = len(probs)
+    
+    # 🔥 Handle both 2-class and 3-class models
+    if num_classes == 3:
+        prob_normal = probs[0]
+        prob_malicious = probs[1]
+        prob_poisoned = probs[2]
+    elif num_classes == 2:
+        prob_normal = probs[0]
+        prob_malicious = probs[1]
+        prob_poisoned = 0.0  # No poisoned class
+    else:
+        print(f"⚠️ Unexpected class count: {num_classes}")
+        return
+    
+    risk_prob = max(prob_malicious, prob_poisoned)
+    conf = abs(risk_prob - 0.5) * 2
 
-    decision, reason = classify_decision(prob, conf, features)
+    decision, reason = classify_decision(prob_malicious, prob_poisoned, conf, features)
 
     print("\n🔥 RESULT")
     print(f"Wallet: {address}")
     print(f"Token: {token}")
-    print(f"Risk: {prob:.4f}")
+    print(f"Normal: {prob_normal:.4f}")
+    print(f"Malicious: {prob_malicious:.4f}")
+    print(f"Poisoned: {prob_poisoned:.4f}")
     print(f"Decision: {decision}")
     print(f"Reason: {reason}")
     print("-" * 40)

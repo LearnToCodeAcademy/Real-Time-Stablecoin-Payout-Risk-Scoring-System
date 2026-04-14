@@ -10,11 +10,16 @@ BASE_URL = "https://api.etherscan.io/v2/api"
 os.makedirs("datasets", exist_ok=True)
 
 # =========================================================
+# 🔥 TOKENS TO PROCESS
+# =========================================================
+TOKENS = ["USDT", "USDC", "BUSD", "DAI", "USDP", "TUSD"]
+
+# =========================================================
 # 🔥 ENABLE TOGGLES (CONTROL OUTPUT CSVs)
 # =========================================================
-ENABLE_V0 = True   # Broad baseline dataset
-ENABLE_V1 = True   # High-trust malicious (manual labeling stage)
-ENABLE_V2 = True   # Scaled malicious dataset
+ENABLE_V0 = False   # Broad baseline dataset
+ENABLE_V1 = False   # High-trust malicious (manual labeling stage)
+ENABLE_V2 = False   # Scaled malicious dataset
 ENABLE_V3 = True   # Poisoning behavior detection dataset
 
 # =========================================================
@@ -194,11 +199,15 @@ def expand_wallets(config, version, use_pool):
 # =========================================================
 # BASE FEATURES (USED BY V0/V1/V2/V3)
 # =========================================================
-def compute_base_features(txs):
+def compute_base_features(txs, token_filter=None):
     rows = []
 
     for tx in txs:
         try:
+            # 🔥 Filter by token if specified
+            if token_filter and tx.get("tokenSymbol", "").upper() != token_filter:
+                continue
+            
             amount = int(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
             timestamp = int(tx["timeStamp"])
             rows.append({"amount": amount, "timestamp": timestamp})
@@ -233,13 +242,17 @@ def compute_base_features(txs):
 # =========================================================
 # V3 POISON FEATURES
 # =========================================================
-def compute_v3_features(txs, wallet, config):
+def compute_v3_features(txs, wallet, config, token_filter=None):
     dust = 0
     senders = set()
     similarity_hits = 0
 
     for tx in txs:
         try:
+            # 🔥 Filter by token if specified
+            if token_filter and tx.get("tokenSymbol", "").upper() != token_filter:
+                continue
+            
             sender = tx["from"]
             value = int(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
 
@@ -269,74 +282,93 @@ def compute_v3_features(txs, wallet, config):
     return dust_ratio, similarity_hits, new_sender_ratio, poisoned
 
 # =========================================================
-# RUNNERS
+# RUNNERS (MULTI-TOKEN)
 # =========================================================
 def run_v0():
     wallets = expand_wallets(CONFIG_V0, "v0", USE_POOL_V0)
-    rows = []
-
+    
+    # 🔥 Process once, save per token
+    all_rows_by_token = {token: [] for token in TOKENS}
+    
     for w in wallets:
         txs = fetch_txs(w)
-        base = compute_base_features(txs)
-        if base:
-            rows.append({"wallet": w, **base, "label": 0})
-
-    pd.DataFrame(rows).to_csv("datasets/v0.csv", index=False)
-    print(f"✅ V0 DONE ({len(rows)})")
+        for token in TOKENS:
+            base = compute_base_features(txs, token_filter=token)
+            if base:
+                all_rows_by_token[token].append({"wallet": w, **base, "label": 0})
+    
+    # Save per-token CSVs
+    for token in TOKENS:
+        if all_rows_by_token[token]:
+            pd.DataFrame(all_rows_by_token[token]).to_csv(f"datasets/v0_{token.lower()}.csv", index=False)
+            print(f"✅ V0 {token} DONE ({len(all_rows_by_token[token])})")
 
 def run_v1():
     wallets = expand_wallets(CONFIG_V1, "v1", USE_POOL_V1)
-    rows = []
-
+    
+    all_rows_by_token = {token: [] for token in TOKENS}
+    
     for w in wallets:
         txs = fetch_txs(w)
-        base = compute_base_features(txs)
-        if base:
-            rows.append({"wallet": w, **base, "label": None})
-
-    pd.DataFrame(rows).to_csv("datasets/v1.csv", index=False)
-    print(f"✅ V1 DONE ({len(rows)})")
+        for token in TOKENS:
+            base = compute_base_features(txs, token_filter=token)
+            if base:
+                all_rows_by_token[token].append({"wallet": w, **base, "label": None})
+    
+    for token in TOKENS:
+        if all_rows_by_token[token]:
+            pd.DataFrame(all_rows_by_token[token]).to_csv(f"datasets/v1_{token.lower()}.csv", index=False)
+            print(f"✅ V1 {token} DONE ({len(all_rows_by_token[token])})")
 
 def run_v2():
     wallets = expand_wallets(CONFIG_V2, "v2", USE_POOL_V2)
-    rows = []
-
+    
+    all_rows_by_token = {token: [] for token in TOKENS}
+    
     for w in wallets:
         txs = fetch_txs(w)
-        base = compute_base_features(txs)
-        if base:
-            rows.append({"wallet": w, **base, "label": None})
-
-    pd.DataFrame(rows).to_csv("datasets/v2.csv", index=False)
-    print(f"✅ V2 DONE ({len(rows)})")
+        for token in TOKENS:
+            base = compute_base_features(txs, token_filter=token)
+            if base:
+                all_rows_by_token[token].append({"wallet": w, **base, "label": None})
+    
+    for token in TOKENS:
+        if all_rows_by_token[token]:
+            pd.DataFrame(all_rows_by_token[token]).to_csv(f"datasets/v2_{token.lower()}.csv", index=False)
+            print(f"✅ V2 {token} DONE ({len(all_rows_by_token[token])})")
 
 def run_v3():
     wallets = expand_wallets(CONFIG_V3, "v3", USE_POOL_V3)
-    rows = []
-
+    
+    all_rows_by_token = {token: [] for token in TOKENS}
+    
     for w in wallets:
         txs = fetch_txs(w)
-        base = compute_base_features(txs)
-        if not base:
-            continue
+        base = compute_base_features(txs)  # Get base for all tokens
+        
+        for token in TOKENS:
+            if not base:
+                continue
+            
+            d, s, n, p = compute_v3_features(txs, w, CONFIG_V3, token_filter=token)
+            
+            all_rows_by_token[token].append({
+                "wallet": w,
+                **base,
+                "dust_tx_ratio": d,
+                "similarity_hits": s,
+                "new_sender_ratio": n,
+                "is_poisoned_pattern": p,
+                "label": 2 if p else -1
+            })
+    
+    for token in TOKENS:
+        if all_rows_by_token[token]:
+            df = pd.DataFrame(all_rows_by_token[token])
+            df.to_csv(f"datasets/v3_raw_{token.lower()}.csv", index=False)
+            df[df["label"] == 2].to_csv(f"datasets/v3_clean_{token.lower()}.csv", index=False)
+            print(f"🔥 V3 {token} DONE ({len(df)})")
 
-        d, s, n, p = compute_v3_features(txs, w, CONFIG_V3)
-
-        rows.append({
-            "wallet": w,
-            **base,
-            "dust_tx_ratio": d,
-            "similarity_hits": s,
-            "new_sender_ratio": n,
-            "is_poisoned_pattern": p,
-            "label": 2 if p else -1
-        })
-
-    df = pd.DataFrame(rows)
-    df.to_csv("datasets/v3_raw.csv", index=False)
-    df[df["label"] == 2].to_csv("datasets/v3_clean.csv", index=False)
-
-    print(f"🔥 V3 DONE ({len(rows)})")
 
 # =========================================================
 # MAIN EXECUTION

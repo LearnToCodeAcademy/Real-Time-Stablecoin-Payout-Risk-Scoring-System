@@ -6,8 +6,13 @@ import time
 API_KEY = "YOUR_API_KEY"
 BASE_URL = "https://api.etherscan.io/v2/api"
 
-INPUT_PATH = "datasets/v3_raw.csv"
-OUTPUT_PATH = "datasets/usdt_labeled_v3.csv"
+# =============================
+# CONFIG 🔥 MULTI-TOKEN
+# =============================
+TOKEN = "usdt"  # 🔥 Change to: usdt, usdc, busd, dai, usdp, tusd
+
+INPUT_PATH = f"datasets/v3_raw_{TOKEN.lower()}.csv"
+OUTPUT_PATH = f"datasets/{TOKEN.lower()}_labeled_v3.csv"
 
 # =============================
 # FETCH TRANSACTIONS

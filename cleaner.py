@@ -2,10 +2,12 @@ import pandas as pd
 import numpy as np
 
 # =============================
-# CONFIG
+# CONFIG 🔥 MULTI-TOKEN
 # =============================
-INPUT_PATH = "datasets/usdc_datasets.csv"
-OUTPUT_PATH = "datasets/usdc_training_ready.csv"
+TOKEN = "usdt"  # 🔥 Change to: usdt, usdc, busd, dai, usdp, tusd
+
+INPUT_PATH = f"datasets/v0_{TOKEN.lower()}.csv"
+OUTPUT_PATH = f"datasets/{TOKEN.lower()}_training_ready.csv"
 
 np.random.seed(42)
 

@@ -1,7 +1,12 @@
 import pandas as pd
 
-INPUT_PATH = "datasets/usdt_training_ready.csv"
-OUTPUT_PATH = "datasets/usdt_labeled_v4.csv"
+# =============================
+# CONFIG 🔥 MULTI-TOKEN
+# =============================
+TOKEN = "usdt"  # 🔥 Change to: usdt, usdc, busd, dai, usdp, tusd
+
+INPUT_PATH = f"datasets/{TOKEN.lower()}_training_ready.csv"
+OUTPUT_PATH = f"datasets/{TOKEN.lower()}_labeled_v4.csv"
 MAX_V4 = 2000
 
 print("🚀 Loading dataset...")

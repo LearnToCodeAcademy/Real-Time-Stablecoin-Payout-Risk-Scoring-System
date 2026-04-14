@@ -1,21 +1,65 @@
-V0: main.py → v0.csv → cleaner.py → usdt_training_ready.csv
+MULTI-TOKEN PIPELINE (USDT, USDC, BUSD, DAI, USDP, TUSD)
+=========================================================
 
-V1 / V2 (malicious detection):
+🔥 STEP 1: RUN MAIN.PY (ONE TIME)
+main.py → Generates all token CSVs:
+  - v0_usdt.csv, v0_usdc.csv, v0_busd.csv, etc.
+  - v1_usdt.csv, v1_usdc.csv, v1_busd.csv, etc.
+  - v2_usdt.csv, v2_usdc.csv, v2_busd.csv, etc.
+  - v3_raw_usdt.csv, v3_raw_usdc.csv, v3_raw_busd.csv, etc.
 
+=========================================================
+🔥 STEP 2: RUN PER-TOKEN SCRIPTS (LOOP THROUGH EACH TOKEN)
+=========================================================
 
-for v1:
-INPUT_CSV = "datasets/v1.csv"
-OUTPUT_CSV = "datasets/usdt_labeled_auto.csv"
-main.py → v1.csv → auto_assign.py → usdt_labeled_auto.csv → train_ml.py
+For each TOKEN in [usdt, usdc, busd, dai, usdp, tusd]:
 
-for v2:
-INPUT_CSV = "datasets/v2.csv"
-OUTPUT_CSV = "datasets/usdt_labeled_v2.csv"
+V0 (BASELINE):
+  1. cleaner.py (set TOKEN = "usdt" at top)
+     v0_usdt.csv → usdt_training_ready.csv
+  
+V1 (HIGH-TRUST MALICIOUS):
+  2. auto_assign_V1_V2.py (set TOKEN = "usdt", VERSION = "v1")
+     v1_usdt.csv → usdt_labeled_auto.csv
+  
+V2 (SCALED MALICIOUS):
+  3. auto_assign_V1_V2.py (set TOKEN = "usdt", VERSION = "v2")
+     v2_usdt.csv → usdt_labeled_v2.csv
+  
+V3 (POISONING BEHAVIOR):
+  4. v3_processor.py (set TOKEN = "usdt")
+     v3_raw_usdt.csv → usdt_labeled_v3.csv
+  
+V4 (HIGH-CONFIDENCE SAFE):
+  5. v4_script.py (set TOKEN = "usdt")
+     usdt_training_ready.csv → usdt_labeled_v4.csv
 
-main.py → v2.csv → auto_assign.py → usdt_labeled_v2.csv → train_ml.py
+=========================================================
+🔥 STEP 3: TRAIN MODEL (PER TOKEN)
+=========================================================
 
-v3:
-main.py → v3_raw.csv → v3 processor → usdt_labeled_v3.csv
+train_ml.py (set TOKEN = "usdt" at top)
+  Combines: usdt_training_ready.csv + usdt_labeled_auto.csv + 
+            usdt_labeled_v2.csv + usdt_labeled_v3.csv + usdt_labeled_v4.csv
+  Outputs: usdt_model.pkl, usdt_scaler.pkl, usdt_features.pkl
 
-v4:
-usdt_training_ready.csv → v4 script → usdt_labeled_v4.csv
+=========================================================
+🔥 INFERENCE
+=========================================================
+
+wallet_check.py
+  - Auto-detects token from wallet transactions
+  - Loads appropriate model (usdt_model, usdc_model, etc.)
+  - Scores wallet in real-time
+
+=========================================================
+AUTOMATION SCRIPT (run_pipeline.py - optional)
+=========================================================
+
+for token in ["usdt", "usdc", "busd", "dai", "usdp", "tusd"]:
+    os.system(f"python cleaner.py {token}")
+    os.system(f"python auto_assign_V1_V2.py {token} v1")
+    os.system(f"python auto_assign_V1_V2.py {token} v2")
+    os.system(f"python v3_processor.py {token}")
+    os.system(f"python v4_script.py {token}")
+    os.system(f"python train_ml.py {token}")
