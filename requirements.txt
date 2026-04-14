@@ -1,0 +1,9 @@
+pandas
+numpy
+requests
+beautifulsoup4
+scikit-learn
+psycopg2-binary
+python-dotenv
+xgboost
+lightgbm
