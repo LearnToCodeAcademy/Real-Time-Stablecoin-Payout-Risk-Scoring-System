@@ -1,0 +1,5 @@
+V0 → broad baseline(d0ne)
+V1 → high-trust malicious(d0ne)
+V2 → scaled malicious(still crawlling)
+V3 → poisoning behavior
+V4 → high-confidence safe (d0ne)

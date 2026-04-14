@@ -3,83 +3,73 @@ import numpy as np
 import pickle
 
 # =============================
-# CONFIG 🔥 (CHANGE TOKEN HERE)
+# CONFIG 🔥
 # =============================
-TOKEN = "usdt"  # change to "usdt"
+TOKEN = "usdt"
 
 SYNTHETIC_PATH = f"datasets/{TOKEN}_training_ready.csv"
-
-LABELED_V1_PATH = f"datasets/{TOKEN}_labeled_auto.csv"
-LABELED_V2_PATH = f"datasets/{TOKEN}_labeled_v2.csv"  # optional
+V1_PATH = f"datasets/{TOKEN}_labeled_auto.csv"
+V2_PATH = f"datasets/{TOKEN}_labeled_v2.csv"
+V3_PATH = f"datasets/{TOKEN}_labeled_v3.csv"
+V4_PATH = f"datasets/{TOKEN}_labeled_v4.csv"
 
 MODEL_PATH = f"models/{TOKEN}_model.pkl"
 SCALER_PATH = f"models/{TOKEN}_scaler.pkl"
 FEATURE_PATH = f"models/{TOKEN}_features.pkl"
 
-# =============================
-# LOAD SYNTHETIC
-# =============================
-df_synth = pd.read_csv(SYNTHETIC_PATH)
-
-# normalize token
-df_synth["token"] = df_synth["token"].str.upper()
-
-print(f"📊 Synthetic rows: {len(df_synth)}")
+USE_V2 = True
+USE_V3 = True
+USE_V4 = True
 
 # =============================
-# LOAD LABELED V1
+# LOAD FUNCTION 🔥
 # =============================
-df_v1 = pd.read_csv(LABELED_V1_PATH)
-
-df_v1 = df_v1.dropna(subset=["label"])
-df_v1["label"] = df_v1["label"].astype(int)
-
-# =============================
-# 🔥 ALIGN LABELED DATA (CRITICAL)
-# =============================
-df_v1["token"] = df_v1["token"].str.upper()
-
-# apply SAME transformations as synthetic
-df_v1["avg_tx"] = np.log1p(df_v1["avg_tx"])
-df_v1["recent_tx"] = np.log1p(df_v1["recent_tx"])
-
-print(f"📊 Labeled V1 rows: {len(df_v1)}")
-
-# =============================
-# LOAD LABELED V2 (OPTIONAL)
-# =============================
-USE_V2 = False  # 🔥 TOGGLE HERE
-
-df_v2 = pd.DataFrame()
-
-if USE_V2:
+def load_dataset(path, log_transform=True):
     try:
-        df_v2 = pd.read_csv(LABELED_V2_PATH)
+        df = pd.read_csv(path)
 
-        df_v2 = df_v2.dropna(subset=["label"])
-        df_v2["label"] = df_v2["label"].astype(int)
+        df = df.dropna(subset=["label"])
+        df["label"] = df["label"].astype(int)
 
-        # align format
-        df_v2["token"] = df_v2["token"].str.upper()
-        df_v2["avg_tx"] = np.log1p(df_v2["avg_tx"])
-        df_v2["recent_tx"] = np.log1p(df_v2["recent_tx"])
+        df["token"] = df["token"].str.upper()
 
-        print(f"📊 Labeled V2 rows: {len(df_v2)}")
+        if log_transform:
+            df["avg_tx"] = np.log1p(df["avg_tx"])
+            df["recent_tx"] = np.log1p(df["recent_tx"])
+
+        return df
 
     except Exception as e:
-        print(f"⚠️ Failed loading V2: {e}")
+        print(f"⚠️ Failed loading {path}: {e}")
+        return pd.DataFrame()
 
 # =============================
-# COMBINE DATASETS 🔥
+# LOAD DATASETS
 # =============================
-df = pd.concat([df_synth, df_v1, df_v2], ignore_index=True)
+df_synth = load_dataset(SYNTHETIC_PATH)
+df_v1 = load_dataset(V1_PATH)
+df_v2 = load_dataset(V2_PATH) if USE_V2 else pd.DataFrame()
+df_v3 = load_dataset(V3_PATH, log_transform=False) if USE_V3 else pd.DataFrame()
+df_v4 = load_dataset(V4_PATH, log_transform=False) if USE_V4 else pd.DataFrame()
 
-print(f"📊 Total training rows: {len(df)}")
+print(f"📊 V0 (synthetic): {len(df_synth)}")
+print(f"📊 V1: {len(df_v1)}")
+print(f"📊 V2: {len(df_v2)}")
+print(f"📊 V3: {len(df_v3)}")
+print(f"📊 V4: {len(df_v4)}")
 
 # =============================
-# FEATURES
+# REMOVE UNUSED COLUMNS
 # =============================
-feature_cols = [
+DROP_COLS = ["prediction", "confidence", "decision", "risk_probability"]
+
+for df_temp in [df_synth, df_v1, df_v2, df_v3, df_v4]:
+    df_temp.drop(columns=DROP_COLS, errors="ignore", inplace=True)
+
+# =============================
+# ENSURE FEATURE CONSISTENCY 🔥
+# =============================
+ALL_FEATURES = [
     "wallet_age_days",
     "avg_tx",
     "recent_tx",
@@ -87,26 +77,60 @@ feature_cols = [
     "tx_per_min",
     "tx_per_hour",
     "tx_per_day",
-    "avg_time_between_tx_sec"
+    "avg_time_between_tx_sec",
+
+    # V3 FEATURES
+    "dust_tx_ratio",
+    "similarity_hits",
+    "new_sender_ratio",
+    "is_poisoned_pattern"
 ]
 
-X = df[feature_cols]
-y = df["label"]
+def ensure_features(df):
+    for col in ALL_FEATURES:
+        if col not in df.columns:
+            df[col] = 0
+    return df
+
+df_synth = ensure_features(df_synth)
+df_v1 = ensure_features(df_v1)
+df_v2 = ensure_features(df_v2)
+df_v3 = ensure_features(df_v3)
+df_v4 = ensure_features(df_v4)
+
+# =============================
+# COMBINE DATASETS 🔥
+# =============================
+df = pd.concat([df_synth, df_v1, df_v2, df_v3, df_v4], ignore_index=True)
+
+print(f"📊 TOTAL TRAINING ROWS: {len(df)}")
+
+# =============================
+# FEATURES / LABEL
+# =============================
+X = df[ALL_FEATURES]
+y = df["label"]  # 0 = normal, 1 = malicious, 2 = poisoned
 
 # =============================
 # WEIGHTS 🔥
 # =============================
 weights = np.concatenate([
-    np.ones(len(df_synth)),                 # synthetic → 1x
-    np.ones(len(df_v1)) * 5,                # V1 → strong truth
-    np.ones(len(df_v2)) * 2 if USE_V2 else np.array([])
+    np.ones(len(df_synth)) * 1.0,
+    np.ones(len(df_v1)) * 5.0,
+    np.ones(len(df_v2)) * 2.0 if USE_V2 else np.array([]),
+    np.ones(len(df_v3)) * 3.0 if USE_V3 else np.array([]),
+    np.ones(len(df_v4)) * 2.5 if USE_V4 else np.array([])
 ])
 
-print("⚖️ Weights:")
-print(f" - Synthetic: {len(df_synth)} rows (1x)")
-print(f" - V1 labels: {len(df_v1)} rows (5x)")
+print("\n⚖️ Weights:")
+print(f" - V0 synthetic: {len(df_synth)} (1x)")
+print(f" - V1 manual: {len(df_v1)} (5x)")
 if USE_V2:
-    print(f" - V2 labels: {len(df_v2)} rows (2x)")
+    print(f" - V2 auto: {len(df_v2)} (2x)")
+if USE_V3:
+    print(f" - V3 poisoned: {len(df_v3)} (3x)")
+if USE_V4:
+    print(f" - V4 safe: {len(df_v4)} (2.5x)")
 
 # =============================
 # SCALE FEATURES
@@ -117,28 +141,24 @@ scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
 # =============================
-# TRAIN MODEL
+# TRAIN MODEL 🔥
 # =============================
 from sklearn.ensemble import RandomForestClassifier
 
 model = RandomForestClassifier(
-    n_estimators=100,
+    n_estimators=200,
+    max_depth=12,
     random_state=42
 )
 
 model.fit(X_scaled, y, sample_weight=weights)
 
 # =============================
-# SAVE MODEL 🔥
+# SAVE MODEL
 # =============================
-with open(MODEL_PATH, "wb") as f:
-    pickle.dump(model, f)
-
-with open(SCALER_PATH, "wb") as f:
-    pickle.dump(scaler, f)
-
-with open(FEATURE_PATH, "wb") as f:
-    pickle.dump(feature_cols, f)
+pickle.dump(model, open(MODEL_PATH, "wb"))
+pickle.dump(scaler, open(SCALER_PATH, "wb"))
+pickle.dump(ALL_FEATURES, open(FEATURE_PATH, "wb"))
 
 print(f"\n🔥 {TOKEN.upper()} MODEL TRAINED & SAVED")
 
@@ -146,8 +166,9 @@ print(f"\n🔥 {TOKEN.upper()} MODEL TRAINED & SAVED")
 # QUICK TEST
 # =============================
 sample = X.iloc[0:1]
-sample_scaled = scaler.transform(sample)
+probs = model.predict_proba(scaler.transform(sample))[0]
 
-prob = model.predict_proba(sample_scaled)[0][1]
-
-print(f"\n🔥 Sample Risk Probability: {prob:.4f}")
+print("\n🔥 Sample Prediction:")
+print(f"Normal: {probs[0]:.4f}")
+print(f"Malicious: {probs[1]:.4f}")
+print(f"Poisoned: {probs[2]:.4f}")
