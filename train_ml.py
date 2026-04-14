@@ -22,18 +22,23 @@ USE_V3 = True
 USE_V4 = True
 
 # =============================
-# LOAD FUNCTION 🔥
+# LOAD FUNCTION 🔥 (SAFE)
 # =============================
 def load_dataset(path, log_transform=True):
     try:
         df = pd.read_csv(path)
 
+        if df.empty:
+            return pd.DataFrame()
+
         df = df.dropna(subset=["label"])
         df["label"] = df["label"].astype(int)
 
-        df["token"] = df["token"].str.upper()
+        if "token" in df.columns:
+            df["token"] = df["token"].astype(str).str.upper()
 
-        if log_transform:
+        # ✅ SAFE LOG TRANSFORM (prevents double log)
+        if log_transform and df["avg_tx"].max() > 50:
             df["avg_tx"] = np.log1p(df["avg_tx"])
             df["recent_tx"] = np.log1p(df["recent_tx"])
 
@@ -53,10 +58,10 @@ df_v3 = load_dataset(V3_PATH, log_transform=False) if USE_V3 else pd.DataFrame()
 df_v4 = load_dataset(V4_PATH, log_transform=False) if USE_V4 else pd.DataFrame()
 
 print(f"📊 V0 (synthetic): {len(df_synth)}")
-print(f"📊 V1: {len(df_v1)}")
-print(f"📊 V2: {len(df_v2)}")
-print(f"📊 V3: {len(df_v3)}")
-print(f"📊 V4: {len(df_v4)}")
+print(f"📊 V1 (manual/auto): {len(df_v1)}")
+print(f"📊 V2 (scaled auto): {len(df_v2)}")
+print(f"📊 V3 (poisoned): {len(df_v3)}")
+print(f"📊 V4 (safe): {len(df_v4)}")
 
 # =============================
 # REMOVE UNUSED COLUMNS
@@ -87,6 +92,8 @@ ALL_FEATURES = [
 ]
 
 def ensure_features(df):
+    if df.empty:
+        return df
     for col in ALL_FEATURES:
         if col not in df.columns:
             df[col] = 0
@@ -103,7 +110,7 @@ df_v4 = ensure_features(df_v4)
 # =============================
 df = pd.concat([df_synth, df_v1, df_v2, df_v3, df_v4], ignore_index=True)
 
-print(f"📊 TOTAL TRAINING ROWS: {len(df)}")
+print(f"\n📊 TOTAL TRAINING ROWS: {len(df)}")
 
 # =============================
 # FEATURES / LABEL
@@ -112,25 +119,35 @@ X = df[ALL_FEATURES]
 y = df["label"]  # 0 = normal, 1 = malicious, 2 = poisoned
 
 # =============================
-# WEIGHTS 🔥
+# SMART WEIGHTING 🔥
 # =============================
 weights = np.concatenate([
-    np.ones(len(df_synth)) * 1.0,
-    np.ones(len(df_v1)) * 5.0,
-    np.ones(len(df_v2)) * 2.0 if USE_V2 else np.array([]),
-    np.ones(len(df_v3)) * 3.0 if USE_V3 else np.array([]),
-    np.ones(len(df_v4)) * 2.5 if USE_V4 else np.array([])
+
+    # V0 → weakest (synthetic)
+    np.ones(len(df_synth)) * 0.8,
+
+    # V1 → strongest truth (manual/verified)
+    np.ones(len(df_v1)) * 6.0,
+
+    # V2 → semi-trusted auto labels
+    np.ones(len(df_v2)) * 2.5 if USE_V2 else np.array([]),
+
+    # V3 → poisoning is rare → boost hard
+    np.ones(len(df_v3)) * 4.0 if USE_V3 else np.array([]),
+
+    # V4 → safe but strict → medium trust
+    np.ones(len(df_v4)) * 3.0 if USE_V4 else np.array([])
 ])
 
-print("\n⚖️ Weights:")
-print(f" - V0 synthetic: {len(df_synth)} (1x)")
-print(f" - V1 manual: {len(df_v1)} (5x)")
+print("\n⚖️ Weights (PRIORITIZED):")
+print(f" - V0 synthetic: {len(df_synth)} (0.8x)")
+print(f" - V1 manual: {len(df_v1)} (6.0x)")
 if USE_V2:
-    print(f" - V2 auto: {len(df_v2)} (2x)")
+    print(f" - V2 auto: {len(df_v2)} (2.5x)")
 if USE_V3:
-    print(f" - V3 poisoned: {len(df_v3)} (3x)")
+    print(f" - V3 poisoned: {len(df_v3)} (4.0x)")
 if USE_V4:
-    print(f" - V4 safe: {len(df_v4)} (2.5x)")
+    print(f" - V4 safe: {len(df_v4)} (3.0x)")
 
 # =============================
 # SCALE FEATURES
@@ -141,14 +158,17 @@ scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
 # =============================
-# TRAIN MODEL 🔥
+# TRAIN MODEL 🔥 (IMPROVED)
 # =============================
 from sklearn.ensemble import RandomForestClassifier
 
 model = RandomForestClassifier(
-    n_estimators=200,
-    max_depth=12,
-    random_state=42
+    n_estimators=300,
+    max_depth=14,
+    min_samples_split=5,
+    class_weight="balanced",   # 🔥 critical
+    random_state=42,
+    n_jobs=-1
 )
 
 model.fit(X_scaled, y, sample_weight=weights)

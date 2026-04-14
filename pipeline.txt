@@ -1,0 +1,21 @@
+V0: main.py → v0.csv → cleaner.py → usdt_training_ready.csv
+
+V1 / V2 (malicious detection):
+
+
+for v1:
+INPUT_CSV = "datasets/v1.csv"
+OUTPUT_CSV = "datasets/usdt_labeled_auto.csv"
+main.py → v1.csv → auto_assign.py → usdt_labeled_auto.csv → train_ml.py
+
+for v2:
+INPUT_CSV = "datasets/v2.csv"
+OUTPUT_CSV = "datasets/usdt_labeled_v2.csv"
+
+main.py → v2.csv → auto_assign.py → usdt_labeled_v2.csv → train_ml.py
+
+v3:
+main.py → v3_raw.csv → v3 processor → usdt_labeled_v3.csv
+
+v4:
+usdt_training_ready.csv → v4 script → usdt_labeled_v4.csv

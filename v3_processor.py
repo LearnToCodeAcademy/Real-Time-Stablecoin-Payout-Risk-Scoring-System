@@ -112,6 +112,13 @@ for i, row in df.iterrows():
 # SAVE
 # =============================
 df_final = pd.DataFrame(rows)
+
+# 🔥 IMPORTANT FIX
+df_final = df_final.drop_duplicates(subset=["wallet"])
+
+if df_final.empty:
+    print("⚠️ No valid V3 samples found")
+
 df_final.to_csv(OUTPUT_PATH, index=False)
 
 print(f"\n✅ V3 READY → {OUTPUT_PATH} ({len(df_final)} rows)")
