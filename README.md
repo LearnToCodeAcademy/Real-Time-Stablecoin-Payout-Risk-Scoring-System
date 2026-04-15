@@ -1,6 +1,6 @@
 # 🔐 Real-Time Stablecoin & Token Payout Risk Scoring System
 
-## System Status: ✅ PRODUCTION READY — 54 TOKENS, 100% COVERAGE
+## System Status: ✅ PRODUCTION READY — 54 TOKENS, 100% COVERAGE, REAL-TIME STREAMING
 
 **Current capabilities:**
 - **54 Tokens Supported**: All major stablecoins, DeFi, L2 native, wrapped, and meme tokens
@@ -9,10 +9,11 @@
 - **Token-Type Specific Logic**: Different detection rules for stablecoins vs DeFi vs meme tokens
 - **ERC20 & Non-ERC20 Support**: Explicitly handles ETH (native) plus 53 ERC20 tokens
 - **3-class decisions**: ALLOW, REVIEW, BLOCK with confidence scoring
+- **Real-Time WebSocket Streaming**: Live transaction monitoring with instant risk scoring and alerts
 
 ## Overview
 
-A production-ready ML-powered system for detecting high-risk wallets across **54 different tokens** with token-type specific detection logic, guaranteed 100% token coverage, and comprehensive stablecoin security.
+A production-ready ML-powered system for detecting high-risk wallets across **54 different tokens** with token-type specific detection logic, guaranteed 100% token coverage, comprehensive stablecoin security, and **real-time WebSocket streaming capabilities**.
 
 The system combines:
 - **Multi-token ML training**: 6 trained models with token-specific class weights
@@ -20,6 +21,7 @@ The system combines:
 - **Type-aware scoring**: Different thresholds for stablecoins (strict), DeFi (medium), meme coins (flexible)
 - **ERC20 & non-ERC20**: Full support for both standards (e.g., ETH native + ERC20 tokens)
 - **Rule-based + ML hybrid**: Catches known patterns + learns from training data
+- **Real-time streaming**: WebSocket listeners, transaction buffering, instant model inference, and automated alerting
 
 ---
 
@@ -77,6 +79,7 @@ Real-Time Stablecoin Payout Risk Scoring System/
 ├── main.py                          # Core dataset generation engine
 ├── train_ml.py                      # Multi-model ML training pipeline
 ├── wallet_check.py                  # Real-time wallet scoring inference
+├── stream_listener.py               # WebSocket streaming & real-time scoring
 ├── db.py                            # Database feature/label caching
 ├── model_tester.py                  # Sanity check / example script
 ├── scan_and_report.py               # Quick inventory of datasets/models
@@ -233,6 +236,95 @@ python wallet_check.py
 # With debug output
 python wallet_check.py 0xea2f73e6c... --token USDT --debug
 ```
+
+#### `stream_listener.py` — Real-Time WebSocket Streaming & Scoring
+
+**What it does:**
+Implements a complete real-time transaction streaming system using WebSockets. It listens for live blockchain transactions, buffers them for efficient batch processing, applies the trained risk models in real-time, and triggers alerts for high-risk activities.
+
+**Key components:**
+- `RealTimeProcessor` — Main orchestrator managing all streaming operations
+- `ChainStream` — WebSocket listener connecting to blockchain data sources
+- `MultiTokenStream` — Aggregates and routes multi-token transactions
+- `StreamBuffer` — Efficient transaction batching with time/size limits
+- `StreamMetrics` — Real-time performance monitoring (throughput, latency, error rates)
+
+**Key features:**
+- **WebSocket Connection Management**:
+  - Auto-reconnection with exponential backoff
+  - Heart-beat mechanism for connection health monitoring
+  - Connection state tracking and logging
+  
+- **Real-Time Transaction Processing**:
+  - Live capture from blockchain WebSocket streams
+  - Multi-token support (ETH, USDT, USDC, BUSD, DAI, USDP, TUSD)
+  - Automatic wallet filtering with configurable thresholds
+  - Batch processing with configurable time and size limits
+  
+- **Instant Risk Scoring**:
+  - Direct model inference on streaming transactions
+  - Maintains feature cache for faster inference
+  - Token-type aware thresholds (stablecoin=strict, meme=flexible)
+  - Parallel processing for high throughput
+  
+- **Alert Generation**:
+  - Automatic alert creation for high-risk wallets
+  - Decision recording (ALLOW, REVIEW, BLOCK)
+  - Activity archiving for audit trails
+  - Configurable alert thresholds per token type
+  
+- **Performance Optimization**:
+  - Asynchronous event processing (non-blocking)
+  - Memory-efficient streamed buffering
+  - Real-time metrics collection and reporting
+  - Graceful degradation on model failures
+
+**Architecture:**
+```
+WebSocket Stream
+      ↓
+ ChainStream (Connection management)
+      ↓
+MultiTokenStream (Token filtering & routing)
+      ↓
+StreamBuffer (Batching)
+      ↓
+RealTimeProcessor (Model inference & alerts)
+      ↓
+AlertsHandler (Alert routing & storage)
+```
+
+**Usage:**
+```python
+from stream_listener import RealTimeProcessor
+
+# Initialize processor
+processor = RealTimeProcessor(
+    tokens=['USDT', 'USDC', 'DAI'],
+    buffer_size=100,          # Batch size
+    buffer_timeout=5,         # Seconds
+    alert_threshold=0.75      # Risk score threshold
+)
+
+# Connect and start processing
+await processor.start()        # Connect to WebSocket stream
+await processor.process()      # Process transactions with batching
+await processor.stop()         # Graceful shutdown
+
+# Get real-time metrics
+metrics = processor.get_metrics()
+print(f"Processed: {metrics['transactions_processed']}")
+print(f"Throughput: {metrics['throughput']} tx/sec")
+print(f"Avg Latency: {metrics['avg_latency']:.2f}ms")
+```
+
+**Environment Configuration:**
+Supports these env variables for customization:
+- `STREAM_BUFFER_SIZE` — Transaction batch size (default: 100)
+- `STREAM_BUFFER_TIMEOUT` — Batch timeout in seconds (default: 5)
+- `STREAM_ALERT_THRESHOLD` — Risk score threshold for alerts (default: 0.75)
+- `STREAM_RECONNECT_ATTEMPTS` — Max reconnection attempts (default: 5)
+- `STREAM_HEARTBEAT_INTERVAL` — Heart-beat check interval in seconds (default: 30)
 
 #### `db.py` — Database Feature and Label Caching
 
