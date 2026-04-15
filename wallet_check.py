@@ -392,34 +392,39 @@ def classify_decision(prob_malicious, prob_poisoned, conf, features, token="USDT
 
 # =============================
 
-def fetch_transactions(address):
-
+def fetch_transactions(address, debug=False):
+    """
+    Fetch token transactions for an address from Etherscan API.
+    [CRITICAL FIX] Added debug mode to diagnose API response issues
+    """
     try:
-
         params = {
-
             "chainid": 1,
-
             "module": "account",
-
             "action": "tokentx",
-
             "address": address,
-
             "offset": 100,
-
             "sort": "desc",
-
             "apikey": API_KEY
-
         }
 
+        response = requests.get(BASE_URL, params=params)
+        data = response.json()
+        result = data.get("result", [])
+        
+        if debug:
+            print(f"[DEBUG] API Response: status={response.status_code}")
+            print(f"[DEBUG] Response data: {data}")
+            if isinstance(result, list) and len(result) > 0:
+                print(f"[DEBUG] First TX: {result[0]}")
+                print(f"[DEBUG] TX keys available: {list(result[0].keys())}")
+                print(f"[DEBUG] tokenSymbol: '{result[0].get('tokenSymbol')}'")
 
-
-        return requests.get(BASE_URL, params=params).json().get("result", [])
-
-    except:
-
+        return result if isinstance(result, list) else []
+        
+    except Exception as e:
+        if debug:
+            print(f"[DEBUG] API Error: {e}")
         return []
 
 
@@ -430,32 +435,80 @@ def fetch_transactions(address):
 
 # =============================
 
-def detect_token(transactions):
+def detect_token(transactions, manual_token=None, debug=False):
     """
-    Detect token from transaction list.
-    - Checks top 20 transactions
-    - Reports which tokens found (both TRAINED and WATCHONLY)
-    - Returns token if in TRAINED_TOKENS list, None otherwise
+    Detect token from transaction list with multiple fallback strategies.
+    
+    [CRITICAL FIX] Now tries multiple detection methods:
+    1. Manual override if provided by user
+    2. Symbol detection (tokenSymbol field)
+    3. Contract address matching (fallback if symbols are empty)
+    4. Returns token if in TRAINED_TOKENS list, None otherwise
     """
-    counts = {}
+    
+    # Strategy 1: Use manual override if provided
+    if manual_token:
+        manual_token_upper = manual_token.upper().strip()
+        if manual_token_upper in SUPPORTED_TOKENS:
+            print(f"[OK] Using manual token override: {manual_token_upper}")
+            return manual_token_upper
+        elif manual_token_upper in ALL_TOKENS:
+            print(f"[WARN] Token {manual_token_upper} detected but not trained (no model available)")
+            return None
+        else:
+            print(f"[ERROR] Unknown token: {manual_token_upper}")
+            return None
+    
+    counts_by_symbol = {}
+    counts_by_contract = {}
+    contract_to_token = {addr.lower(): token for token, addr in ALL_TOKENS.items()}
+    
+    if debug:
+        print(f"[DEBUG] Processing {len(transactions[:20])} transactions for token detection")
     
     # Check top 20 most recent transactions
-    for tx in transactions[:20]:
-        if isinstance(tx, dict):
-            sym = tx.get("tokenSymbol")
-            if isinstance(sym, str):
-                sym = sym.upper().strip()
-                # Check against expanded tokens list
-                if sym in ALL_TOKENS:
-                    counts[sym] = counts.get(sym, 0) + 1
+    for i, tx in enumerate(transactions[:20]):
+        if not isinstance(tx, dict):
+            continue
+        
+        # Strategy 2: Try symbol-based detection first
+        sym = tx.get("tokenSymbol", "")
+        if isinstance(sym, str) and sym:
+            sym = sym.upper().strip()
+            if sym in ALL_TOKENS:
+                counts_by_symbol[sym] = counts_by_symbol.get(sym, 0) + 1
+                if debug and i < 3:
+                    print(f"[DEBUG] TX {i}: Symbol '{sym}' found")
+                continue
+        
+        # Strategy 3: Fallback to contract address matching
+        contract = tx.get("contractAddress", "").lower()
+        if contract and contract in contract_to_token:
+            token = contract_to_token[contract]
+            counts_by_contract[token] = counts_by_contract.get(token, 0) + 1
+            if debug and i < 3:
+                print(f"[DEBUG] TX {i}: Contract {contract[:10]}... → {token}")
+        elif debug and i < 3 and contract:
+            print(f"[DEBUG] TX {i}: Contract {contract[:10]}... not recognized, symbol='{sym}'")
     
-    if not counts:
-        print("[WARN] No recognized tokens found in transaction history")
+    # Combine results: prefer symbol detection, fallback to contract
+    all_counts = {**counts_by_contract, **counts_by_symbol}
+    
+    if not all_counts:
+        print(f"[WARN] No recognized tokens found in transaction history")
+        if debug:
+            print(f"[DEBUG] Checked {len(transactions[:20])} transactions")
+            if transactions:
+                print(f"[DEBUG] Sample TX contractAddress: '{transactions[0].get('contractAddress')}'")
+                print(f"[DEBUG] Sample TX tokenSymbol: '{transactions[0].get('tokenSymbol')}'")
         return None
     
     # Find most common token
-    detected_token = max(counts, key=counts.get)
-    count = counts[detected_token]
+    detected_token = max(all_counts, key=all_counts.get)
+    count = all_counts[detected_token]
+    
+    if debug:
+        print(f"[DEBUG] Token counts: {all_counts}")
     
     # Check if it's a trained token
     if detected_token in SUPPORTED_TOKENS:
@@ -463,7 +516,7 @@ def detect_token(transactions):
         return detected_token
     else:
         # It's a watchonly token - report but don't score
-        other_tokens = [f"{t} ({counts[t]})" for t in sorted(counts.keys()) if t != detected_token]
+        other_tokens = [f"{t} ({all_counts[t]})" for t in sorted(all_counts.keys()) if t != detected_token]
         other_str = f" | Other detected: {', '.join(other_tokens)}" if other_tokens else ""
         print(f"[WARN] Detected token: {detected_token} (count: {count}) - UNSUPPORTED (no model trained){other_str}")
         print(f"[SKIP] {detected_token} wallet scoring disabled - model not available")
@@ -657,9 +710,21 @@ def align_features_for_token(token, features):
 
 # =============================
 
-def score_wallet(address):
-
+def score_wallet(address, manual_token=None, debug=False):
+    """
+    Score wallet risk using trained ML models with token-specific thresholds.
+    
+    [CRITICAL FIX] New parameters:
+    - manual_token: Allow users to manually specify token (e.g., "USDT") for debugging
+    - debug: Enable verbose debugging of API responses and token detection
+    
+    Example: score_wallet("0x...", manual_token="USDT", debug=True)
+    """
     total_start = time.time()
+    
+    if debug:
+        print(f"[DEBUG] Starting wallet_check for {address}")
+        print(f"[DEBUG] manual_token={manual_token}, debug={debug}")
 
     # [CRITICAL] Validate address is not a known token contract
     address_lower = address.lower()
@@ -753,8 +818,6 @@ def score_wallet(address):
 
     print(f"[WARN] DB MISS ({time.time() - db_start:.3f}s)")
 
-
-
     # =============================
 
     # API FETCH
@@ -763,17 +826,26 @@ def score_wallet(address):
 
     api_start = time.time()
 
-    txs = fetch_transactions(address)
+    txs = fetch_transactions(address, debug=debug)
 
     print(f"? API TIME: {time.time() - api_start:.3f}s")
 
     if not txs:
-        print("No transactions")
+        print(f"[ERROR] No transactions found via API for {address}")
+        if debug:
+            print(f"[DEBUG] This could mean:")
+            print(f"[DEBUG] 1. Wallet has no token transfers")
+            print(f"[DEBUG] 2. API rate limit or connectivity issue")
+            print(f"[DEBUG] 3. Wrong API key configured")
+        print(f"? TOTAL TIME: {time.time() - total_start:.3f}s")
         return
 
-    token = detect_token(txs)
+    token = detect_token(txs, manual_token=manual_token, debug=debug)
     if not token:
         print(f"[ERROR] Scoring skipped - no supported token model available")
+        if debug:
+            print(f"[DEBUG] Detected transactions but no recognized TRAINED token")
+            print(f"[DEBUG] Available TRAINED tokens: {SUPPORTED_TOKENS}")
         print(f"? TOTAL TIME: {time.time() - total_start:.3f}s")
         return
 
@@ -915,31 +987,45 @@ def score_wallet(address):
 # =============================
 
 if __name__ == "__main__":
-
+    import sys
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Score wallet risk using ML models")
+    parser.add_argument("address", nargs="?", help="Wallet address to score (0x...)")
+    parser.add_argument("--token", type=str, help="[FIX] Manual token override (e.g., USDT, USDC)")
+    parser.add_argument("--debug", action="store_true", help="[FIX] Enable debug mode for diagnostics")
+    parser.add_argument("--interactive", "-i", action="store_true", help="Interactive mode (default if no address provided)")
+    
+    args = parser.parse_args()
+    
     print("? FINAL SYSTEM")
+    
+    # If address provided as CLI arg, score it directly
+    if args.address:
+        print(f"\n[CLI] Scoring wallet: {args.address}")
+        if args.token:
+            print(f"[CLI] Manual token override: {args.token}")
+        if args.debug:
+            print(f"[CLI] Debug mode ENABLED")
+        score_wallet(args.address, manual_token=args.token, debug=args.debug)
+    else:
+        # Interactive mode
+        while True:
 
+            w = input("\nWallet (or 'exit'): ")
 
+            if w.lower() == "exit":
+                break
 
-    while True:
+            if not w.startswith("0x"):
+                print("[ERROR] Invalid address (must start with 0x)")
+                continue
 
-        w = input("\nWallet: ")
+            # In interactive mode, ask for token override if desired
+            token_override = input("Token override (press Enter for auto-detect, or type USDT/USDC/etc): ").strip().upper() or None
+            
+            debug_mode = input("Enable debug mode? (y/n): ").strip().lower() == "y"
 
+            score_wallet(w, manual_token=token_override, debug=debug_mode)
 
-
-        if w.lower() == "exit":
-
-            break
-
-
-
-        if not w.startswith("0x"):
-
-            print("[ERROR] Invalid address")
-
-            continue
-
-
-
-        score_wallet(w)
-
-        time.sleep(0.3)
+            time.sleep(0.3)
