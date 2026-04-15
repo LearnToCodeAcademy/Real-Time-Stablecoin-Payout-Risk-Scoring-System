@@ -11,24 +11,78 @@ import os
 
 
 # =============================
-
-# CONFIG ? MULTI-TOKEN
-
+# CONFIG – MULTI-TOKEN
 # =============================
 
-TOKEN = "all"  # ? Change to: "all" (train all tokens) or specific token: "usdt", "usdc", "busd", "dai", "usdp", "tusd"
+TOKEN = "all"  # Change to: "all" (train all tokens) or specific: "usdt", "usdc", "dai", etc.
 
 TRAIN_ESTIMATORS = 150
-
 TRAIN_MAX_DEPTH = 14
-
 TRAIN_N_JOBS = 1
 
-
-
 # Available tokens
-
 AVAILABLE_TOKENS = ["usdt", "usdc", "busd", "dai", "usdp", "tusd"]
+
+# =============================
+# TOKEN-SPECIFIC CONFIGURATIONS
+# =============================
+# Different tokens = different attacker patterns = different ML parameters
+TOKEN_CONFIG = {
+    "usdt": {
+        "name": "Tether USD",
+        "category": "stablecoin",
+        "primary_threats": ["institutional_phishing", "credential_theft", "large_tx_hijacking"],
+        "class_weights": {0: 0.8, 1: 6.0, 2: 4.0},  # Normal, Malicious, Poisoned
+        "min_tx_threshold": 3,  # Must have min txs
+        "high_confidence_threshold": 0.95,  # Very high = immediate block
+        "feature_importance": ["avg_tx", "tx_frequency", "wallet_age_days"],  # Top features for USDT
+    },
+    "usdc": {
+        "name": "USD Coin",
+        "category": "stablecoin",
+        "primary_threats": ["phishing", "social_engineering", "fake_contracts"],
+        "class_weights": {0: 0.8, 1: 5.0, 2: 3.5},
+        "min_tx_threshold": 3,
+        "high_confidence_threshold": 0.90,
+        "feature_importance": ["recent_tx", "similarity_hits", "tx_per_hour"],
+    },
+    "dai": {
+        "name": "DAI",
+        "category": "stablecoin",
+        "primary_threats": ["collateral_manipulation", "flash_loan_exploits"],
+        "class_weights": {0: 0.8, 1: 5.5, 2: 4.0},
+        "min_tx_threshold": 3,
+        "high_confidence_threshold": 0.92,
+        "feature_importance": ["dust_tx_ratio", "is_poisoned_pattern", "avg_tx"],
+    },
+    "busd": {
+        "name": "Binance USD",
+        "category": "stablecoin",
+        "primary_threats": ["centralized_censorship_bypass", "institutional_attacks"],
+        "class_weights": {0: 0.8, 1: 6.0, 2: 4.5},
+        "min_tx_threshold": 3,
+        "high_confidence_threshold": 0.93,
+        "feature_importance": ["wallet_age_days", "unique_receivers", "tx_frequency"],
+    },
+    "usdp": {
+        "name": "Paxos USD",
+        "category": "stablecoin",
+        "primary_threats": ["regulatory_evasion", "aml_bypass"],
+        "class_weights": {0: 0.8, 1: 4.5, 2: 3.5},
+        "min_tx_threshold": 3,
+        "high_confidence_threshold": 0.88,
+        "feature_importance": ["repeat_small_to_count", "short_time_window", "no_meaningful_flow"],
+    },
+    "tusd": {
+        "name": "True USD",
+        "category": "stablecoin",
+        "primary_threats": ["redemption_fraud", "bridge_exploits"],
+        "class_weights": {0: 0.8, 1: 5.0, 2: 3.8},
+        "min_tx_threshold": 3,
+        "high_confidence_threshold": 0.91,
+        "feature_importance": ["avg_time_between_tx_sec", "window_days", "tx_per_day"],
+    },
+}
 
 
 

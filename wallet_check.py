@@ -111,6 +111,61 @@ TOKEN_CONTRACTS = {
 
 
 # =============================
+# TOKEN-SPECIFIC SCORING RULES
+# =============================
+# Different tokens = different attack patterns = different detection logic
+TOKEN_SCORING_RULES = {
+    "USDT": {
+        "description": "Tether - Institutional stablecoin",
+        "risk_profile": "HIGH_VALUE_TARGETS",
+        "malicious_threshold": 0.88,  # Stripe institutional accounts
+        "poisoned_threshold": 0.75,   # Credential theft patterns
+        "rule_checks": ["large_tx_spike", "unusual_institution_pattern", "cex_withdrawal_spam"],
+        "anomaly_window_hours": 24,
+    },
+    "USDC": {
+        "description": "Circle USD Coin",
+        "risk_profile": "RETAIL_PHISHING",
+        "malicious_threshold": 0.85,
+        "poisoned_threshold": 0.72,
+        "rule_checks": ["social_engineering", "fake_contract_interaction", "high_frequency_spam"],
+        "anomaly_window_hours": 6,
+    },
+    "DAI": {
+        "description": "MakerDAO Stablecoin",
+        "risk_profile": "DEFI_EXPLOITS",
+        "malicious_threshold": 0.82,
+        "poisoned_threshold": 0.70,
+        "rule_checks": ["flash_loan_patterns", "collateral_manipulation", "governance_attack_setup"],
+        "anomaly_window_hours": 1,
+    },
+    "BUSD": {
+        "description": "Binance USD",
+        "risk_profile": "EXCHANGE_MANIPULATION",
+        "malicious_threshold": 0.86,
+        "poisoned_threshold": 0.73,
+        "rule_checks": ["exchange_arb_wash", "institutional_spoofing", "cex_margin_attack"],
+        "anomaly_window_hours": 12,
+    },
+    "USDP": {
+        "description": "Paxos USD",
+        "risk_profile": "REGULATORY_EVASION",
+        "malicious_threshold": 0.83,
+        "poisoned_threshold": 0.71,
+        "rule_checks": ["aml_bypass_pattern", "sanctioned_wallet_routing", "privacy_mixer_usage"],
+        "anomaly_window_hours": 48,
+    },
+    "TUSD": {
+        "description": "True USD",
+        "risk_profile": "BRIDGE_EXPLOITS",
+        "malicious_threshold": 0.84,
+        "poisoned_threshold": 0.72,
+        "rule_checks": ["bridge_exploit_signature", "redemption_fraud", "cross_chain_manipulation"],
+        "anomaly_window_hours": 36,
+    },
+}
+
+# =============================
 # LAZY MODEL LOADING (on-demand)
 # =============================
 # Models are loaded only when needed to avoid startup delays and KeyboardInterrupt issues
@@ -259,69 +314,47 @@ def apply_rule_based_filters(features, prob_malicious, prob_poisoned):
 
 # =============================
 
-def classify_decision(prob_malicious, prob_poisoned, conf, features, low_data=False):
-
+def classify_decision(prob_malicious, prob_poisoned, conf, features, token="USDT", low_data=False):
+    """
+    Classify wallet risk with TOKEN-SPECIFIC thresholds.
+    Different tokens have different attacker profiles and risk models.
+    """
+    # Get token-specific rules (default to USDT if not found)
+    rules = TOKEN_SCORING_RULES.get(token, TOKEN_SCORING_RULES["USDT"])
+    malicious_thresh = rules.get("malicious_threshold", 0.88)
+    poisoned_thresh = rules.get("poisoned_threshold", 0.75)
+    
     # [CRITICAL] Check VERY HIGH model confidence FIRST (skip rules if model is very certain)
+    if prob_poisoned >= poisoned_thresh:
+        return "BLOCK", f"Poisoned {token} wallet (high confidence - address spoofing) | Rule: {rules.get('risk_profile')}"
 
-    if prob_poisoned >= 0.7:
-
-        return "BLOCK", "Poisoned wallet (high confidence - address spoofing)"
-
-    
-
-    if prob_malicious >= 0.9:
-
-        return "BLOCK", "Malicious wallet (very high confidence - phishing/scam)"
-
-    
+    if prob_malicious >= malicious_thresh:
+        return "BLOCK", f"Malicious {token} wallet (high confidence - {rules.get('description')}) | Threats: {', '.join(rules.get('primary_threats', []))}"
 
     # Then apply rule-based filters for lower confidence cases (defensive heuristics)
-
     rule_decision, rule_conf, rule_name = apply_rule_based_filters(features, prob_malicious, prob_poisoned)
-
     if rule_decision:
-
-        return rule_decision, f"{rule_name} (rule-based check)"
-
-    
+        return rule_decision, f"{rule_name} (rule-based check for {token})"
 
     if low_data:
-
         return "REVIEW", "Insufficient data"
 
-
-
     if features["wallet_age_days"] <= 1:
-
         return "REVIEW", "New wallet"
 
-
-
     if features["tx_per_day"] < 3:
-
         return "REVIEW", "Low activity"
 
-
-
     if conf < 0.3:
-
         return "REVIEW", "Low confidence"
 
+    # Medium-high poisoning
+    if prob_poisoned >= (poisoned_thresh - 0.15):
+        return "BLOCK", f"Poisoned {token} wallet (medium-high confidence)"
 
-
-    # ? MEDIUM-HIGH POISONING
-
-    if prob_poisoned >= 0.5:
-
-        return "BLOCK", "Poisoned wallet (medium-high confidence)"
-
-
-
-    # ? MEDIUM-HIGH MALICIOUS
-
-    if prob_malicious >= 0.8:
-
-        return "BLOCK", "Malicious wallet (high confidence)"
+    # Medium-high malicious
+    if prob_malicious >= (malicious_thresh - 0.08):
+        return "BLOCK", f"Malicious {token} wallet (high confidence)"
 
 
 
@@ -688,7 +721,7 @@ def score_wallet(address):
 
 
 
-            decision, reason = classify_decision(prob_malicious, prob_poisoned, conf, features)
+            decision, reason = classify_decision(prob_malicious, prob_poisoned, conf, features, token=token)
 
 
 
@@ -847,7 +880,7 @@ def score_wallet(address):
 
 
 
-    decision, reason = classify_decision(prob_malicious, prob_poisoned, conf, features)
+    decision, reason = classify_decision(prob_malicious, prob_poisoned, conf, features, token=token)
 
 
 
