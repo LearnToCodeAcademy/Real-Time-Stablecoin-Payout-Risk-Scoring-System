@@ -30,6 +30,16 @@ MODEL_DIR = "models"
 
 SUPPORTED_TOKENS = ["USDT", "USDC", "BUSD", "DAI", "USDP", "TUSD"]
 
+# [CRITICAL] Known stablecoin contract addresses - SKIP THESE
+TOKEN_CONTRACTS = {
+    "0xdAC17F958D2ee523a2206206994597C13D831ec7": "USDT",  # USDT contract
+    "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48": "USDC",  # USDC contract
+    "0x4Fabb145d64652a948d72533023f6E7A623C7C53": "BUSD",  # BUSD contract
+    "0x6B175474E89094C44Da98b954EedeAC495271d0F": "DAI",   # DAI contract
+    "0x8E870D67F660D95d5be2D627f142b3d3C9145e9D": "USDP",  # USDP contract
+    "0x0000000000085d4780B73119b8B580991DEe8d52": "TUSD",  # TUSD contract
+}
+
 
 
 # =============================
@@ -529,6 +539,18 @@ def align_features_for_token(token, features):
 def score_wallet(address):
 
     total_start = time.time()
+
+    # [CRITICAL] Validate address is not a known token contract
+    address_lower = address.lower()
+    for contract_addr, token_name in TOKEN_CONTRACTS.items():
+        if address_lower == contract_addr.lower():
+            print(f"\n[SKIP] Token Contract Address Detected")
+            print(f"Address: {address}")
+            print(f"Token: {token_name}")
+            print(f"Reason: This is the {token_name} token contract, not a user wallet")
+            print(f"Result: SKIP")
+            print(f"? TOTAL TIME: {time.time() - total_start:.3f}s")
+            return
 
 
 
