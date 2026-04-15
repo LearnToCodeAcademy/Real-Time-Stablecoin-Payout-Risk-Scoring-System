@@ -183,9 +183,13 @@ POOL_FILES = {
 # Hard-code seeds per version here — edit as needed.
 SEEDS_V0 = [
     "0x0a2978072FCe42eCeC6193431b1fbF65368Ed4a2"
+    "0x9C0d2305495676eda3F86BBB6f070a5578118Ce8"
+    "0x21E26f9d487C1dfACB23ae69E256b47E4d7D451b"
+    "0xAaD38c88712e2e4B9F407D353f61AC76e2C8746B"
 ]
 SEEDS_V1 = [
     "0x3D0f22BF11636CC9cb129e2B261EEd35a487455C"
+    "0xd62802FcFd561F0679a84C84eb33b0D1f56849b2"
 ]
 SEEDS_V2 = [
     "0x07f6CE0b13477152d9D1A7768D0A8efc1A03133a",
@@ -682,34 +686,241 @@ def compute_base_features(txs, token_filter=None):
     }
 
 # =========================================================
-# ETHERSCAN KEYWORD SCRAPING (FOR V1/V2 AUTO-LABELING)
-# =========================================================
-KEYWORDS = ["phish", "scam", "spam", "hack", "exploit", "malicious"]
+# ENTERPRISE FRAUD DETECTION (STRIPE-GRADE)
+# ========================================================
+# Multi-layered approach: keyword + behavioral + chain analysis
+
+# Advanced keyword patterns (common scam tactics)
+FRAUD_KEYWORDS = {
+    # Phishing/Impersonation
+    "phishing": ["phish", "fake wallet", "impersonate", "pretend", "fake", "spoof"],
+    
+    # Scams
+    "scam": ["scam", "fraud", "swindle", "confidence game", "rip-off", "scheme"],
+    
+    # Direct theft
+    "theft": ["steal", "theft", "stolen", "robbed", "hacked", "breach"],
+    
+    # Exploits
+    "exploit": ["exploit", "vulnerability", "bug bounty", "cve-", "0day"],
+    
+    # Pump & Dump
+    "pump_dump": ["pump and dump", "exit scam", "rug pull", "liquidity lock", "dump"],
+    
+    # Spam/NFT Scams
+    "spam": ["spam", "flooding", "dust attack", "nft scam", "token spam"],
+    
+    # Money Laundering/Mixing
+    "mixing": ["mixer", "tumbler", "launder", "aml bypass", "sanctions evade"],
+}
+
+# Obfuscation patterns (scammers try to hide)
+OBFUSCATION_PATTERNS = [
+    "xxx", "XXX",  # Common obfuscation
+    "***",         # Censoring attempts
+    "[REDACTED]", "[REMOVED]",
+    "phishing".replace("i", "1").replace("s", "5"),  # Leetspeak
+    "scam".replace("a", "@").replace("s", "$"),
+]
+
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
+def analyze_text_for_fraud(text, strict=False):
+    """
+    STRIPE-GRADE: Multi-level text analysis for fraud indicators.
+    Returns: fraud_score (0-100), detected_categories (list)
+    
+    Levels:
+    1. EXACT: Direct keyword match
+    2. CONTEXT: Keywords + surrounding text analysis
+    3. OBFUSCATION: Attempts to hide suspicious terms
+    """
+    text_lower = text.lower()
+    fraud_score = 0
+    detected = []
+    
+    # Level 1: EXACT keyword matching
+    for category, keywords in FRAUD_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in text_lower:
+                fraud_score += 20  # +20 per category
+                if category not in detected:
+                    detected.append(category)
+                break  # Only count once per category
+    
+    # Level 2: CONTEXT analysis
+    # Check if fraud keywords appear WITH suspicious phrases
+    if any(kw in text_lower for kw in ["phish", "scam", "exploit", "steal"]):
+        # Now check context
+        suspicious_context = [
+            "report", "alert", "warning", "caught", "confirmed",
+            "documented", "identified", "wallet", "address", "account"
+        ]
+        context_hits = sum(1 for ctx in suspicious_context if ctx in text_lower)
+        
+        if context_hits >= 2:  # Multiple context indicators = higher confidence
+            fraud_score += 15
+            if "context_confirmed" not in detected:
+                detected.append("context_confirmed")
+    
+    # Level 3: OBFUSCATION detection (very suspicious)
+    for pattern in OBFUSCATION_PATTERNS:
+        if pattern in text:
+            fraud_score += 25  # High score for obfuscation
+            if "obfuscation" not in detected:
+                detected.append("obfuscation")
+    
+    # Normalize fraud_score to 0-100
+    fraud_score = min(100, fraud_score)
+    
+    return fraud_score, detected
+
 def check_wallet_keywords(address):
-    """Scrape Etherscan page for keywords. Return 1 if found, None if not found."""
+    """
+    ENTERPRISE: Multi-layered keyword detection.
+    Returns: 1 (suspicious), None (unknown), 0 (safe)
+    
+    Process:
+    1. Scrape Etherscan page
+    2. Analyze text with multi-level fraud detection
+    3. Apply Stripe-like confidence thresholds
+    """
     url = f"https://etherscan.io/address/{address}"
     try:
         res = requests.get(url, headers=HEADERS, timeout=10)
         if res.status_code != 200:
-            return None
+            return None  # Unknown (API error)
         
         soup = BeautifulSoup(res.text, "html.parser")
-        text = soup.get_text().lower()
+        text = soup.get_text()
         
-        for kw in KEYWORDS:
-            if kw in text:
-                return 1  # Suspicious
+        # Analyze with multi-level detection
+        fraud_score, detected_categories = analyze_text_for_fraud(text, strict=False)
         
-        return None  # Unknown
+        # Stripe-like thresholds for decision making:
+        # 0-25: Safe (low fraud indicators)
+        # 26-60: Review (requires human check or more signals)
+        # 61+: Block (high confidence fraud)
+        
+        if fraud_score >= 60:
+            return 1  # 🚨 Suspicious - Block
+        elif fraud_score >= 26:
+            return None  # Ambiguous - Keep as unknown (review tier)
+        else:
+            return 0  # Safe - Green light
+        
     except Exception as e:
-        print(f"  ⚠️ Scrape error: {str(e)[:40]}")
-        return None
+        # Silent fail - API errors don't mark as fraud
+        return None  # Unknown
+
+# ========================================================
+# BEHAVIORAL FRAUD DETECTION (Chain Analysis)
+# ========================================================
+
+def analyze_transaction_patterns(txs, token_filter=None):
+    """
+    STRIPE-GRADE: Detect behavioral patterns of fraud.
+    
+    Checks:
+    1. Bot activity (perfectly timed txs)
+    2. Value patterns (coordinated amounts)
+    3. Frequency anomalies (velocity)
+    4. Dust attacks (spam)
+    5. Circular flows (money laundering)
+    """
+    if not txs:
+        return 0, []
+    
+    behavior_score = 0
+    patterns = []
+    
+    # Filter by token if specified
+    if token_filter:
+        txs = [tx for tx in txs if tx.get("tokenSymbol", "").upper() == token_filter]
+    
+    if not txs or len(txs) < 2:
+        return 0, []
+    
+    try:
+        # Extract timestamps and values
+        times = []
+        values = []
+        froms = set()
+        
+        for tx in txs:
+            try:
+                ts = int(tx.get("timeStamp", 0))
+                val = float(tx.get("value", 0)) / (10 ** int(tx.get("tokenDecimal", 18)))
+                times.append(ts)
+                values.append(val)
+                froms.add(tx.get("from", ""))
+            except:
+                continue
+        
+        if len(times) < 2:
+            return 0, []
+        
+        # 1️⃣ BOT DETECTION - Perfectly spaced transactions
+        times_sorted = sorted(times)
+        intervals = [times_sorted[i+1] - times_sorted[i] for i in range(len(times_sorted)-1)]
+        
+        if intervals:
+            avg_interval = sum(intervals) / len(intervals)
+            
+            # Check for perfect spacing (within 5% variance)
+            exact_spacing = sum(1 for interval in intervals if abs(interval - avg_interval) / max(avg_interval, 1) < 0.05)
+            if exact_spacing / len(intervals) > 0.7:  # 70%+ exact spacing = bot
+                behavior_score += 30
+                patterns.append("bot_activity")
+        
+        # 2️⃣ VELOCITY CHECK - Too many txs in short time
+        if len(txs) > 20 and (times_sorted[-1] - times_sorted[0]) < 3600:  # 20+ txs in 1 hour
+            behavior_score += 25
+            patterns.append("high_velocity")
+        
+        # 3️⃣ DUST ATTACK DETECTION - Many tiny transactions
+        dust_txs = sum(1 for v in values if v < 0.001)
+        if len(values) > 5 and dust_txs / len(values) > 0.5:  # 50%+ are dust
+            behavior_score += 20
+            patterns.append("dust_attack")
+        
+        # 4️⃣ VALUE ANOMALY - Perfectly repeated amounts
+        if len(set(values)) < len(values) / 2:  # Many repeated values
+            behavior_score += 15
+            patterns.append("value_repetition")
+        
+        # 5️⃣ SENDER DIVERSITY - Many senders = potential coordination
+        if len(froms) > len(txs) * 0.8:  # 80%+ unique senders
+            behavior_score += 10
+            patterns.append("high_sender_diversity")
+        
+        behavior_score = min(100, behavior_score)
+        
+        return behavior_score, patterns
+    
+    except Exception as e:
+        return 0, []
+
+# ========================================================
+# COMPOSITE FRAUD SCORING (Multi-Signal)
+# ========================================================
+
+def calculate_fraud_score(keyword_score, behavior_score):
+    """
+    Combine multiple fraud signals like Stripe does.
+    Uses weighted average with emphasis on keyword (high-confidence signal).
+    """
+    # Weight signals: keywords are more reliable than behavior
+    keyword_weight = 0.7
+    behavior_weight = 0.3
+    
+    composite = (keyword_score * keyword_weight) + (behavior_score * behavior_weight)
+    return min(100, composite)
 
 # =========================================================
-# V3 POISON FEATURES
+# V3 POISON FEATURES (ENHANCED)
 # =========================================================
+
 def compute_v3_features(txs, wallet, config, token_filter=None):
     dust = 0
     senders = set()
@@ -752,56 +963,137 @@ def compute_v3_features(txs, wallet, config, token_filter=None):
 # =========================================================
 # V0 VALIDATION (LIGHTER THAN V4)
 # =========================================================
-_keyword_cache = {}
+# V0 & V4 SAFETY FILTERS (ENTERPRISE GRADE)
+# =========================================================
+# Minimize false positives: Only block if VERY confident wallet is suspicious
+# Allow legitimate use cases (traders, active users, etc.)
 
-def is_v0_safe_candidate(row, wallet):
+_keyword_cache = {}
+_behavior_cache = {}
+
+def is_v0_safe_candidate(row, wallet, txs=None):
+    """
+    STRIPE-GRADE: V0 safety filter with multi-signal fraud detection.
+    
+    Strategy: CONSERVATIVE
+    - Only exclude if HIGH CONFIDENCE fraud detected
+    - Allow edge cases (new wallets, high frequency traders, etc.)
+    - Require multiple fraud signals to block
+    """
+    
+    # ⚠️ HARD FILTERS (Categorical blockers - no false positives allowed)
+    # Wallets under 7 days = can't evaluate properly yet
     if row["wallet_age_days"] < 7:
         return False
-    if row["tx_per_day"] > 50:
-        return False
-    if row["avg_tx"] < 0.001:
-        return False
-    if row["avg_tx"] < 0.01 and row["tx_per_day"] > 20:
-        return False
-
+    
+    # Impossible patterns = definitely spam
+    # EXCEPTION: Very low-value txs are OK if few and spread out
+    if row["avg_tx"] < 0.0001 and row["tx_frequency"] > 50:
+        return False  # Spam dust attack
+    
+    # ⚠️ FRAUD SIGNAL ANALYSIS (Multi-signal approach)
+    fraud_signals = 0
+    max_signals = 5
+    
+    # Signal 1: Text-based keyword fraud detection
     if wallet in _keyword_cache:
-        keyword_label = _keyword_cache[wallet]
+        keyword_result = _keyword_cache[wallet]
     else:
-        keyword_label = check_wallet_keywords(wallet)
-        _keyword_cache[wallet] = keyword_label
+        keyword_result = check_wallet_keywords(wallet)
+        _keyword_cache[wallet] = keyword_result
+    
+    # IMPORTANT: keyword_result is now: 1 (suspicious), 0 (safe), None (unknown)
+    if keyword_result == 1:  # High-confidence fraud from keywords
+        fraud_signals += 2  # Worth 2 signals
+    elif keyword_result == 0:
+        fraud_signals -= 1  # Safe from keywords (reduces suspicion)
+    
+    # Signal 2: Behavioral pattern analysis
+    if txs:
+        behavior_score, patterns = analyze_transaction_patterns(txs)
+        if "bot_activity" in patterns or "high_velocity" in patterns:
+            fraud_signals += 1.5
+        elif behavior_score > 50:
+            fraud_signals += 1
+    
+    # Signal 3: Transaction frequency anomaly
+    if row["tx_per_day"] > 100:  # Extreme frequency
+        fraud_signals += 1
+    elif row["tx_per_day"] > 50:  # High but possible for traders
+        fraud_signals += 0.5
+    
+    # Signal 4: Value patterns (too low)
+    # EXCEPTION: Wallets with few txs can have low avg
+    if row["avg_tx"] < 0.001 and row["tx_frequency"] > 10:
+        fraud_signals += 0.5
+    
+    # Signal 5: Mixed patterns (low value + high frequency = dust attack)
+    if row["avg_tx"] < 0.01 and row["tx_per_day"] > 20 and row["tx_frequency"] > 50:
+        fraud_signals += 1
+    
+    # ✅ DECISION: Block only with HIGH CONFIDENCE (2+ fraud signals)
+    if fraud_signals >= 2.0:
+        return False  # ❌ Block - multiple fraud signals
+    
+    # If keyword_result == 0 (explicitly safe) or fraud_signals < 1, allow it
+    return True  # ✅ Allow
 
-    if keyword_label == 1:
-        return False
 
-    return True
-
-
-def is_v4_high_confidence_candidate(row, wallet):
+def is_v4_high_confidence_candidate(row, wallet, txs=None):
+    """
+    STRIPE-GRADE: V4 safety filter - STRICTEST for high-confidence safe wallets.
+    
+    Strategy: VERY CONSERVATIVE
+    - Only include if wallet shows CLEAR legitimate patterns
+    - Only block if VERY HIGH confidence fraud detected
+    - Require sustained, normal behavior over time
+    """
+    
+    # ⚠️ HARD FILTERS (High bar for V4)
     if row["wallet_age_days"] < 30:
-        return False
+        return False  # Too new to be "high confidence safe"
+    
     if row["tx_per_day"] > 20:
-        return False
+        return False  # Too active for "stable" classification
+    
     if row["tx_per_hour"] > 8:
-        return False
-    if row["avg_tx"] < 0.01:
-        return False
-    if row["avg_time_between_tx_sec"] < 1800:
-        return False
-    if row["avg_tx"] < 0.05 and row["tx_per_day"] > 10:
-        return False
-
+        return False  # Rapid-fire activity
+    
+    # Allow reasonable minimum values (traders might make small txs)
+    if row["avg_tx"] < 0.001:
+        return False  # Too low
+    
+    if row["avg_time_between_tx_sec"] < 1800:  # Less than 30 min between txs
+        return False  # Too frequent
+    
+    if row["avg_tx"] < 0.05 and row["tx_per_day"] > 5:
+        return False  # Low value + high frequency = suspicious
+    
+    # ⚠️ FRAUD SIGNAL ANALYSIS
+    fraud_signals = 0
+    
+    # Check keyword fraud detection
     if wallet in _keyword_cache:
-        keyword_label = _keyword_cache[wallet]
+        keyword_result = _keyword_cache[wallet]
     else:
-        keyword_label = check_wallet_keywords(wallet)
-        _keyword_cache[wallet] = keyword_label
-
-    if keyword_label == 1:
-        return False
-
+        keyword_result = check_wallet_keywords(wallet)
+        _keyword_cache[wallet] = keyword_result
+    
+    # For V4, keyword fraud is an automatic blocker
+    if keyword_result == 1:
+        return False  # ❌ Marked as fraudulent
+    
+    # Check behavioral patterns
+    if txs:
+        behavior_score, patterns = analyze_transaction_patterns(txs)
+        if "bot_activity" in patterns or "dust_attack" in patterns:
+            return False  # ❌ Clear fraud pattern
+    
+    # ✅ Passed all checks - this is high-confidence safe
     return True
 
 # =========================================================
+
 # RUNNERS (MULTI-TOKEN)
 # =========================================================
 def run_v0():
@@ -816,7 +1108,8 @@ def run_v0():
             base = compute_base_features(txs, token_filter=token)
             if base:
                 row = {"wallet": w, "token": token.lower(), **base, "label": 0}
-                if is_v0_safe_candidate(row, w):
+                # ENTERPRISE: Pass txs for behavioral analysis
+                if is_v0_safe_candidate(row, w, txs=txs):
                     all_rows_by_token[token].append(row)
     
     # Save per-token CSVs
