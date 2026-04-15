@@ -111,44 +111,51 @@ TOKEN_CONTRACTS = {
 
 
 # =============================
-
-# LOAD MODELS
-
+# LAZY MODEL LOADING (on-demand)
 # =============================
+# Models are loaded only when needed to avoid startup delays and KeyboardInterrupt issues
 
 MODELS, SCALERS, FEATURE_COLS = {}, {}, {}
 
 
-
-for token in SUPPORTED_TOKENS:
-
+def load_model_for_token(token):
+    """
+    Lazy load model for a specific token.
+    Called only when scoring is actually needed.
+    """
+    if token in MODELS:
+        return  # Already loaded
+    
+    if token not in SUPPORTED_TOKENS:
+        raise ValueError(f"No model available for token {token}")
+    
     prefix = os.path.join(MODEL_DIR, token.lower())
-
     model_path = f"{prefix}_model.pkl"
-
     scaler_path = f"{prefix}_scaler.pkl"
-
     features_path = f"{prefix}_features.pkl"
-
-
-
+    
     if os.path.exists(model_path) and os.path.exists(scaler_path) and os.path.exists(features_path):
-
         try:
-
             MODELS[token] = pickle.load(open(model_path, "rb"))
-
             SCALERS[token] = pickle.load(open(scaler_path, "rb"))
-
             FEATURE_COLS[token] = pickle.load(open(features_path, "rb"))
-
+            print(f"[OK] Loaded model for {token}")
         except Exception as e:
-
             print(f"[WARN] Failed to load {token} model: {e}")
-
+            raise
     else:
+        raise FileNotFoundError(f"Model files missing for {token}")
 
-        print(f"[WARN] Missing files for {token} model; expected {model_path}, {scaler_path}, {features_path}")
+
+# Pre-load at startup for diagnostics (optional, catches issues early)
+try:
+    for token in SUPPORTED_TOKENS:
+        prefix = os.path.join(MODEL_DIR, token.lower())
+        model_path = f"{prefix}_model.pkl"
+        if os.path.exists(model_path):
+            load_model_for_token(token)
+except Exception as e:
+    print(f"[WARN] Model pre-load issue: {e} (will attempt lazy load on use)")
 
 
 
