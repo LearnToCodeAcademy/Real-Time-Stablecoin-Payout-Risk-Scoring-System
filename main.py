@@ -68,7 +68,7 @@ USE_POOL_V0 = False
 USE_POOL_V1 = False
 USE_POOL_V2 = False
 USE_POOL_V3 = False
-USE_POOL_V4 = True
+USE_POOL_V4 = False
 
 POOL_FOLDER = "public address dataset"
 
@@ -170,7 +170,7 @@ MODE_RUN = "dual"
 # - Label: 0
 # =========================================================
 CONFIG_V0 = {
-    "MAX_TOTAL_WALLETS": 4000,
+    "MAX_TOTAL_WALLETS": 6000,
     "MAX_WALLETS_PER_SOURCE": 20,
     "SEEDS": SEEDS_V0  # 🔥 Per-version seeds (edit SEEDS_V0 above)
 }
@@ -182,7 +182,7 @@ CONFIG_V0 = {
 # - Label: None → later curated
 # =========================================================
 CONFIG_V1 = {
-    "MAX_TOTAL_WALLETS": 2000,
+    "MAX_TOTAL_WALLETS": 4000,
     "MAX_WALLETS_PER_SOURCE": 10,
     "SEEDS": SEEDS_V1  # 🔥 Per-version seeds (edit SEEDS_V1 above)
 }
@@ -194,7 +194,7 @@ CONFIG_V1 = {
 # - Label: None → semi-supervised
 # =========================================================
 CONFIG_V2 = {
-    "MAX_TOTAL_WALLETS": 5000,
+    "MAX_TOTAL_WALLETS": 6000,
     "MAX_WALLETS_PER_SOURCE": 25,
     "SEEDS": SEEDS_V2  # 🔥 Per-version seeds (edit SEEDS_V2 above)
 }
@@ -205,7 +205,7 @@ CONFIG_V2 = {
 # - Output: Auto-labeled malicious (label=2)
 # =========================================================
 CONFIG_V3 = {
-    "MAX_TOTAL_WALLETS": 6000,
+    "MAX_TOTAL_WALLETS": 8000,
     "MAX_WALLETS_PER_SOURCE": 50,
     "SEEDS": SEEDS_V3,  # 🔥 Per-version seeds (edit SEEDS_V3 above)
     "dust_threshold": 0.001,
@@ -220,7 +220,7 @@ CONFIG_V3 = {
 # - Label: 0
 # =========================================================
 CONFIG_V4 = {
-    "MAX_TOTAL_WALLETS": 2500,
+    "MAX_TOTAL_WALLETS": 3500,
     "MAX_WALLETS_PER_SOURCE": 15,
     "SEEDS": SEEDS_V4  # 🔥 Per-version seeds (edit SEEDS_V4 above)
 }
