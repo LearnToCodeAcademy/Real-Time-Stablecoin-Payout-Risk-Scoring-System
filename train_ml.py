@@ -8,6 +8,24 @@ import pickle
 
 import os
 
+from sklearn.preprocessing import StandardScaler
+from sklearn.utils import resample
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import f1_score
+
+try:
+    from xgboost import XGBClassifier
+    HAS_XGB = True
+except ImportError:
+    HAS_XGB = False
+
+try:
+    from lightgbm import LGBMClassifier
+    HAS_LGB = True
+except ImportError:
+    HAS_LGB = False
+
 
 
 # =============================
@@ -387,14 +405,21 @@ def train_token_model(token, model_choice="auto"):
     
 
     # Check if we have enough data
-
     if len(df) == 0:
-
-        print(f"\n[ERROR] ERROR: No training data available for {token.upper()}")
-
-        print(f"   At least V1 (manual/auto) data is required for training.")
-
-        return
+        print(f"\n[ERROR] ❌ NO TRAINING DATA for {token.upper()}")
+        print(f"\nRequired dataset files (at least one must exist):")
+        print(f"   - datasets/v0_{token}.csv or datasets/{token}_training_ready.csv (baseline safe)")
+        print(f"   - datasets/v1_{token}.csv (manual/auto-labeled malicious)")
+        print(f"   - datasets/v2_{token}.csv (scaled malicious)")
+        print(f"   - datasets/v3_{token}.csv (poisoning behavior)")
+        print(f"   - datasets/{token}_labeled_v4.csv (high-confidence safe)")
+        print(f"\nMissing files for {token.upper()}:")
+        for version_name, version_path in version_files.items():
+            if not os.path.exists(version_path):
+                print(f"   - {version_name}: {version_path}")
+        print(f"\nTo generate datasets, run:")
+        print(f"   python main.py --mode dual")
+        print(f"\nSkipping {token.upper()} model training.")
 
     
 
@@ -483,9 +508,6 @@ def train_token_model(token, model_choice="auto"):
     
 
     # Scale features
-
-    from sklearn.preprocessing import StandardScaler
-
     scaler = StandardScaler()
 
     X_scaled = scaler.fit_transform(X)
@@ -499,11 +521,6 @@ def train_token_model(token, model_choice="auto"):
     # =============================
 
     # Many samples are labeled -1 (unknown); focus on clear labels (0, 1, 2)
-
-    from sklearn.utils import resample
-
-    
-
     labeled_indices = y[y != -1].index.tolist()  # Keep only labeled samples
 
     unknown_indices = y[y == -1].index.tolist()  # Set aside unknown (-1) samples
@@ -577,13 +594,6 @@ def train_token_model(token, model_choice="auto"):
 
 
     # Train / compare multiple models (RandomForest, XGBoost, LightGBM if available)
-
-    from sklearn.model_selection import train_test_split
-
-    from sklearn.metrics import f1_score
-
-
-
     sample_weight = weights if (isinstance(weights, np.ndarray) and len(weights) == len(df)) else None
 
 
@@ -621,9 +631,6 @@ def train_token_model(token, model_choice="auto"):
     models = {}
 
     # RandomForest baseline
-
-    from sklearn.ensemble import RandomForestClassifier
-
     models['rf'] = RandomForestClassifier(
 
         n_estimators=TRAIN_ESTIMATORS,
@@ -640,55 +647,34 @@ def train_token_model(token, model_choice="auto"):
 
     )
 
-
-
     # Try XGBoost
-
-    try:
-
-        from xgboost import XGBClassifier
-
-        models['xgb'] = XGBClassifier(
-
-            n_estimators=200,
-
-            max_depth=6,
-
-            use_label_encoder=False,
-
-            eval_metric='mlogloss',
-
-            random_state=42,
-
-            n_jobs=TRAIN_N_JOBS
-
-        )
-
-    except Exception as e:
-
-        print(f"[WARN] xgboost not available: {e}")
-
-
+    if HAS_XGB:
+        try:
+            models['xgb'] = XGBClassifier(
+                n_estimators=200,
+                max_depth=6,
+                use_label_encoder=False,
+                eval_metric='mlogloss',
+                random_state=42,
+                n_jobs=TRAIN_N_JOBS
+            )
+        except Exception as e:
+            print(f"[WARN] XGBoost instantiation failed: {e}")
+    else:
+        print("[WARN] XGBoost not installed (pip install xgboost)")
 
     # Try LightGBM
-
-    try:
-
-        from lightgbm import LGBMClassifier
-
-        models['lgb'] = LGBMClassifier(
-
-            n_estimators=200,
-
-            random_state=42,
-
-            n_jobs=TRAIN_N_JOBS
-
-        )
-
-    except Exception as e:
-
-        print(f"[WARN] lightgbm not available: {e}")
+    if HAS_LGB:
+        try:
+            models['lgb'] = LGBMClassifier(
+                n_estimators=200,
+                random_state=42,
+                n_jobs=TRAIN_N_JOBS
+            )
+        except Exception as e:
+            print(f"[WARN] LightGBM instantiation failed: {e}")
+    else:
+        print("[WARN] LightGBM not installed (pip install lightgbm)")
 
 
 
@@ -877,33 +863,34 @@ if __name__ == "__main__":
     token_arg = args.token.lower()
 
 
-
     if token_arg == "all":
-
         print("\n" + "="*60)
-
         print("? TRAINING ALL TOKENS")
-
         print("="*60)
-
+        
+        successful = []
+        failed = []
+        
         for token in AVAILABLE_TOKENS:
-
             try:
-
                 train_token_model(token, model_choice=model_choice)
-
+                successful.append(token.upper())
             except Exception as e:
-
-                print(f"\n[ERROR] ERROR: {token.upper()} model failed with exception: {e}")
-
+                print(f"\n[ERROR] {token.upper()} model training FAILED")
+                print(f"   Reason: {str(e)[:200]}")  # Show first 200 chars of error
+                failed.append(token.upper())
                 continue
-
+        
         print("\n" + "="*60)
-
-        print("[OK] ALL TOKENS DONE")
-
+        print("📊 TRAINING SUMMARY")
         print("="*60)
-
+        if successful:
+            print(f"✅ Successful ({len(successful)}): {', '.join(successful)}")
+        if failed:
+            print(f"❌ Failed ({len(failed)}): {', '.join(failed)}")
+            print("\nTo retry failed models, run:")
+            for token in failed:
+                print(f"   python train_ml.py --token {token.lower()}")
+        print("="*60)
     else:
-
         train_token_model(token_arg, model_choice=model_choice)
