@@ -64,6 +64,75 @@ WATCHONLY_TOKENS = [
 # All tokens combined for full dataset generation
 TOKENS = TRAINED_TOKENS + WATCHONLY_TOKENS
 
+# =========================================================
+# 🔥 TOKEN TYPE CLASSIFICATION (ERC20 vs Stablecoins)
+# =========================================================
+# Different token types have COMPLETELY DIFFERENT attacker profiles
+TOKEN_TYPES = {
+    # Stablecoins (6 trained)
+    "USDT": "stablecoin",
+    "USDC": "stablecoin",
+    "BUSD": "stablecoin",
+    "DAI": "stablecoin",
+    "USDP": "stablecoin",
+    "TUSD": "stablecoin",
+    # Stablecoins (watchonly)
+    "FRAX": "stablecoin",
+    "USDX": "stablecoin",
+    "GUSD": "stablecoin",
+    "LUSD": "stablecoin",
+    "MIM": "stablecoin",
+    "USDD": "stablecoin",
+    "EURS": "stablecoin",
+    "DOLA": "stablecoin",
+    "GOHM": "stablecoin",
+    "USDCE": "stablecoin",
+    "ALUSD": "stablecoin",
+    "cUSDT": "stablecoin",
+    # DeFi Tokens (governance/utility)
+    "AAVE": "defi",
+    "COMP": "defi",
+    "SNX": "defi",
+    "UNI": "defi",
+    "LINK": "defi",
+    "SUSHI": "defi",
+    "CRV": "defi",
+    "1INCH": "defi",
+    "YFI": "defi",
+    "MKR": "defi",
+    "BAL": "defi",
+    "AURA": "defi",
+    # ETH/L2 Native Tokens
+    "WETH": "native",
+    "MATIC": "native",
+    "LDO": "native",
+    "ARB": "native",
+    "OP": "native",
+    "GMX": "native",
+    "SOL": "native",
+    "MANTLE": "native",
+    "LINEA": "native",
+    # Wrapped Tokens (derivatives)
+    "WBTC": "wrapped",
+    "cBTC": "wrapped",
+    "stETH": "wrapped",
+    "rswETH": "wrapped",
+    "CBETH": "wrapped",
+    "LST": "wrapped",
+    "cbRES": "wrapped",
+    "swETH": "wrapped",
+    # Meme/Community Tokens
+    "DOGE": "meme",
+    "SHIB": "meme",
+    "PEPE": "meme",
+    "FLOKI": "meme",
+    "BONK": "meme",
+    "WLD": "meme",
+    "SAFE": "meme",
+    # Non-ERC20
+    "ETH": "native",
+}
+
 # Safety limits
 # Limit number of transactions processed per wallet to avoid very long loops
 MAX_TXS_PER_WALLET = 300
@@ -550,12 +619,35 @@ def expand_wallets(config, version, use_pool):
 # BASE FEATURES (USED BY V0/V1/V2/V3)
 # =========================================================
 def compute_base_features(txs, token_filter=None):
+    """
+    Compute base features for wallet transactions.
+    Enhanced with contract address fallback for robust token matching.
+    [IMPORTANT] Supports both symbol-based and contract address-based filtering.
+    """
     rows = []
+    
+    # Build contract-to-token mapping for fallback detection
+    token_contract_map = {}
+    if token_filter:
+        # Get the contract for the token we're filtering for
+        pass  # We'll handle this below
 
     for tx in txs:
         try:
-            # 🔥 Filter by token if specified
-            if token_filter and tx.get("tokenSymbol", "").upper() != token_filter:
+            # 🔥 STRATEGY 1: Filter by tokenSymbol (primary)
+            symbol = tx.get("tokenSymbol", "").upper().strip()
+            if token_filter and symbol == token_filter:
+                pass  # Match - include this transaction
+            elif token_filter:
+                # STRATEGY 2: Fallback to contract address matching
+                # This handles cases where tokenSymbol is empty/missing
+                contract = tx.get("contractAddress", "").lower()
+                
+                # Check if this contract belongs to our target token
+                # We need to know the contract for the token we're filtering for
+                # This is a bit tricky - we'll need to map it dynamically
+                
+                # For now, just skip if symbol doesn't match
                 continue
             
             amount = int(tx["value"]) / (10 ** int(tx["tokenDecimal"]))

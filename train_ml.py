@@ -24,13 +24,30 @@ TRAIN_N_JOBS = 1
 AVAILABLE_TOKENS = ["usdt", "usdc", "busd", "dai", "usdp", "tusd"]
 
 # =============================
+# TOKEN TYPE CLASSIFICATION
+# =============================
+# Critical: Different token types have COMPLETELY DIFFERENT attacker behaviors
+TOKEN_TYPE = {
+    "usdt": "stablecoin",
+    "usdc": "stablecoin",
+    "busd": "stablecoin",
+    "dai": "stablecoin",
+    "usdp": "stablecoin",
+    "tusd": "stablecoin",
+}
+
+# =============================
 # TOKEN-SPECIFIC CONFIGURATIONS
 # =============================
-# Different tokens = different attacker patterns = different ML parameters
+# IMPORTANT: Different tokens = different attacker patterns = different ML parameters
+# NOTE: Currently all trained tokens are STABLECOINS
+# Stablecoin attackers focus on: phishing, credentials, institutional hacks, AML bypass
+# When adding ERC20/DeFi tokens: use different class weights, thresholds, feature importance
 TOKEN_CONFIG = {
     "usdt": {
         "name": "Tether USD",
         "category": "stablecoin",
+        "token_type": "stablecoin",
         "primary_threats": ["institutional_phishing", "credential_theft", "large_tx_hijacking"],
         "class_weights": {0: 0.8, 1: 6.0, 2: 4.0},  # Normal, Malicious, Poisoned
         "min_tx_threshold": 3,  # Must have min txs
@@ -40,6 +57,7 @@ TOKEN_CONFIG = {
     "usdc": {
         "name": "USD Coin",
         "category": "stablecoin",
+        "token_type": "stablecoin",
         "primary_threats": ["phishing", "social_engineering", "fake_contracts"],
         "class_weights": {0: 0.8, 1: 5.0, 2: 3.5},
         "min_tx_threshold": 3,
@@ -49,6 +67,7 @@ TOKEN_CONFIG = {
     "dai": {
         "name": "DAI",
         "category": "stablecoin",
+        "token_type": "stablecoin",
         "primary_threats": ["collateral_manipulation", "flash_loan_exploits"],
         "class_weights": {0: 0.8, 1: 5.5, 2: 4.0},
         "min_tx_threshold": 3,
@@ -58,6 +77,7 @@ TOKEN_CONFIG = {
     "busd": {
         "name": "Binance USD",
         "category": "stablecoin",
+        "token_type": "stablecoin",
         "primary_threats": ["centralized_censorship_bypass", "institutional_attacks"],
         "class_weights": {0: 0.8, 1: 6.0, 2: 4.5},
         "min_tx_threshold": 3,
@@ -67,6 +87,7 @@ TOKEN_CONFIG = {
     "usdp": {
         "name": "Paxos USD",
         "category": "stablecoin",
+        "token_type": "stablecoin",
         "primary_threats": ["regulatory_evasion", "aml_bypass"],
         "class_weights": {0: 0.8, 1: 4.5, 2: 3.5},
         "min_tx_threshold": 3,
@@ -76,6 +97,7 @@ TOKEN_CONFIG = {
     "tusd": {
         "name": "True USD",
         "category": "stablecoin",
+        "token_type": "stablecoin",
         "primary_threats": ["redemption_fraud", "bridge_exploits"],
         "class_weights": {0: 0.8, 1: 5.0, 2: 3.8},
         "min_tx_threshold": 3,

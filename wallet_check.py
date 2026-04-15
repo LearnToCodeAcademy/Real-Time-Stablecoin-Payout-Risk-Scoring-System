@@ -166,6 +166,76 @@ TOKEN_SCORING_RULES = {
 }
 
 # =============================
+# TOKEN TYPE CLASSIFICATION
+# =============================
+# Critical: Different token types have COMPLETELY DIFFERENT attacker profiles
+TOKEN_TYPE_CLASSIFICATION = {
+    # Stablecoins (18): Attackers use phishing, credentials, institutional hacks
+    "USDT": "stablecoin", "USDC": "stablecoin", "BUSD": "stablecoin", "DAI": "stablecoin",
+    "USDP": "stablecoin", "TUSD": "stablecoin", "FRAX": "stablecoin", "USDX": "stablecoin",
+    "GUSD": "stablecoin", "LUSD": "stablecoin", "MIM": "stablecoin", "USDD": "stablecoin",
+    "EURS": "stablecoin", "DOLA": "stablecoin", "GOHM": "stablecoin", "USDCE": "stablecoin",
+    "ALUSD": "stablecoin", "cUSDT": "stablecoin",
+    
+    # DeFi Tokens (12): Attackers exploit contracts, governance, flash loans
+    "AAVE": "defi", "COMP": "defi", "SNX": "defi", "UNI": "defi",
+    "LINK": "defi", "SUSHI": "defi", "CRV": "defi", "1INCH": "defi",
+    "YFI": "defi", "MKR": "defi", "BAL": "defi", "AURA": "defi",
+    
+    # Native/L2 (9): Layer 2 protocols, ETH derivative attacks
+    "WETH": "native", "MATIC": "native", "LDO": "native", "ARB": "native",
+    "OP": "native", "GMX": "native", "SOL": "native", "MANTLE": "native", "LINEA": "native",
+    
+    # Wrapped (8): Bridge exploits, wrap/unwrap attacks
+    "WBTC": "wrapped", "cBTC": "wrapped", "stETH": "wrapped", "rswETH": "wrapped",
+    "CBETH": "wrapped", "LST": "wrapped", "cbRES": "wrapped", "swETH": "wrapped",
+    
+    # Meme/Community (7): Rug pulls, pump & dumps, coordinated dumps
+    "DOGE": "meme", "SHIB": "meme", "PEPE": "meme", "FLOKI": "meme",
+    "BONK": "meme", "WLD": "meme", "SAFE": "meme",
+    
+    # Non-ERC20 (1): Native blockchain behavior
+    "ETH": "native",
+}
+
+# token-specific feature thresholds based on TYPE
+# Stablecoins: LOW volatility tolerance, HIGH phishing risk
+# DeFi: MEDIUM volatility, EXPLOIT risk
+# Meme: HIGH volatility, RUG PULL risk
+TOKEN_TYPE_THRESHOLDS = {
+    "stablecoin": {
+        "max_tx_volatility": 2.0,  # 200% increase is extreme
+        "max_daily_activity": 500,  # More than 500 txs/day is unusual
+        "min_transaction_value": 0.01,  # Below 0.01 is dust
+        "unusual_tx_spike_multiplier": 10.0,  # 10x normal activity
+    },
+    "defi": {
+        "max_tx_volatility": 5.0,  # More volatile than stables
+        "max_daily_activity": 1000,
+        "min_transaction_value": 0.001,
+        "unusual_tx_spike_multiplier": 5.0,
+    },
+    "native": {
+        "max_tx_volatility": 3.0,
+        "max_daily_activity": 800,
+        "min_transaction_value": 0.0001,
+        "unusual_tx_spike_multiplier": 8.0,
+    },
+    "wrapped": {
+        "max_tx_volatility": 4.0,
+        "max_daily_activity": 1200,
+        "min_transaction_value": 0.0001,
+        "unusual_tx_spike_multiplier": 6.0,
+    },
+    "meme": {
+        "max_tx_volatility": 10.0,  # Very volatile
+        "max_daily_activity": 5000,  # Can have massive volume
+        "min_transaction_value": 1.0,  # Pump & dumps use big amounts
+        "unusual_tx_spike_multiplier": 3.0,
+    },
+}
+
+# =============================
 # LAZY MODEL LOADING (on-demand)
 # =============================
 # Models are loaded only when needed to avoid startup delays and KeyboardInterrupt issues
