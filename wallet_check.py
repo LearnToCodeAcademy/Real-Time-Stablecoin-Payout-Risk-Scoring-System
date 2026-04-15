@@ -11,8 +11,20 @@ import numpy as np
 import time
 
 
-
 from db import get_features, save_features
+
+# 🧠 GRAPH ENGINE - Network Intelligence
+try:
+    from graph_engine import TransactionGraph
+except ImportError:
+    TransactionGraph = None
+
+# 🧠 INTERPRETABILITY - SHAP Explainability
+try:
+    import shap
+    HAS_SHAP = True
+except ImportError:
+    HAS_SHAP = False
 
 
 
@@ -563,10 +575,317 @@ def detect_token(transactions, manual_token=None, debug=False):
 
 # =============================
 
+
+
+def _compute_graph_features(wallet_address, transactions):
+    """
+    🧠 Compute graph features for wallet from transactions
+    Returns dictionary of graph metrics
+    """
+    if not TransactionGraph or not transactions or not wallet_address:
+        return {
+            'graph_degree': 0,
+            'graph_pagerank': 0.0,
+            'graph_clustering': 0.0,
+            'graph_betweenness': 0.0,
+            'graph_unique_counterparties': 0,
+            'graph_inflow': 0.0,
+            'graph_outflow': 0.0,
+            'connected_to_malicious': 0
+        }
+    
+    try:
+        graph = TransactionGraph(directed=True)
+        
+        for tx in transactions:
+            try:
+                sender = tx.get("from", "").lower()
+                recipient = tx.get("to", "").lower()
+                
+                if not sender or not recipient:
+                    continue
+                
+                amount = int(tx.get("value", 0)) / (10 ** int(tx.get("tokenDecimal", 18)))
+                graph.add_transaction(sender, recipient, amount)
+            except:
+                continue
+        
+        features = graph.extract_features(wallet_address.lower())
+        return features
+        
+    except Exception as e:
+        return {
+            'graph_degree': 0,
+            'graph_pagerank': 0.0,
+            'graph_clustering': 0.0,
+            'graph_betweenness': 0.0,
+            'graph_unique_counterparties': 0,
+            'graph_inflow': 0.0,
+            'graph_outflow': 0.0,
+            'connected_to_malicious': 0
+        }
+
+
+def _compute_advanced_features(txs):
+    """
+    🧠 ADVANCED FEATURE ENGINEERING - Temporal, behavioral, value, sequence patterns
+    """
+    try:
+        if len(txs) < 3:
+            return _get_empty_advanced_features_wallet()
+        
+        rows = []
+        senders = []
+        receivers = []
+        values = []
+        timestamps = []
+        
+        for tx in txs:
+            try:
+                amount = int(tx.get("value", 0)) / (10 ** int(tx.get("tokenDecimal", 18)))
+                if amount <= 0:
+                    continue
+                
+                timestamp = int(tx.get("timeStamp", 0))
+                sender = tx.get("from", "").lower()
+                receiver = tx.get("to", "").lower()
+                
+                if sender and receiver:
+                    rows.append({
+                        'amount': amount,
+                        'timestamp': timestamp,
+                        'sender': sender,
+                        'receiver': receiver
+                    })
+                    senders.append(sender)
+                    receivers.append(receiver)
+                    values.append(amount)
+                    timestamps.append(timestamp)
+            except:
+                continue
+        
+        if len(rows) < 3:
+            return _get_empty_advanced_features_wallet()
+        
+        df = pd.DataFrame(rows)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        df = df.sort_values('timestamp')
+        
+        # TEMPORAL FEATURES
+        time_diffs = df['timestamp'].diff().dt.total_seconds().fillna(0).values
+        burst_threshold = 60
+        burst_count = np.sum(time_diffs < burst_threshold)
+        burst_ratio = burst_count / len(time_diffs) if len(time_diffs) > 0 else 0
+        
+        inter_arrival_var = np.var(time_diffs[time_diffs > 0]) if np.sum(time_diffs > 0) > 1 else 0
+        
+        active_hours = df['timestamp'].dt.hour.value_counts()
+        hours_active = len(active_hours)
+        hour_concentration = active_hours.max() / len(df) if len(df) > 0 else 0
+        
+        # BEHAVIORAL FEATURES
+        from collections import Counter
+        
+        unique_senders = len(set(senders))
+        sender_entropy = -np.sum((np.array(list(Counter(senders).values())) / len(senders)) * 
+                                 np.log2(np.array(list(Counter(senders).values())) / len(senders) + 1e-10))
+        
+        unique_receivers = len(set(receivers))
+        receiver_entropy = -np.sum((np.array(list(Counter(receivers).values())) / len(receivers)) *
+                                   np.log2(np.array(list(Counter(receivers).values())) / len(receivers) + 1e-10))
+        
+        direction_ratio = unique_senders / unique_receivers if unique_receivers > 0 else unique_senders
+        
+        # VALUE-BASED FEATURES
+        p25 = np.percentile(values, 25)
+        p50 = np.percentile(values, 50)
+        p75 = np.percentile(values, 75)
+        p95 = np.percentile(values, 95)
+        
+        max_spike_ratio = np.max(values) / (p50 if p50 > 0 else 1)
+        
+        mean_val = np.mean(values)
+        median_val = p50
+        median_mean_ratio = mean_val / (median_val if median_val > 0 else 1)
+        
+        recent_values = df['amount'].iloc[-5:].sum()
+        total_values = df['amount'].sum()
+        recent_concentration = recent_values / (total_values if total_values > 0 else 1)
+        
+        # SEQUENCE FEATURES
+        send_back_count = 0
+        for i in range(len(df) - 1):
+            curr_sender = df.iloc[i]['sender']
+            curr_receiver = df.iloc[i]['receiver']
+            next_sender = df.iloc[i + 1]['sender']
+            next_receiver = df.iloc[i + 1]['receiver']
+            
+            if (curr_sender == next_receiver and curr_receiver == next_sender):
+                send_back_count += 1
+        
+        send_back_ratio = send_back_count / max(len(df) - 1, 1)
+        
+        flow_pairs = [(row['sender'], row['receiver']) for _, row in df.iterrows()]
+        flow_counts = Counter(flow_pairs)
+        cyclic_flows = sum(1 for count in flow_counts.values() if count > 2)
+        cyclic_ratio = cyclic_flows / len(flow_counts) if len(flow_counts) > 0 else 0
+        
+        repeat_receiver_ratio = len([c for c in Counter(receivers).values() if c > 3]) / unique_receivers if unique_receivers > 0 else 0
+        
+        return {
+            'temporal_burst_ratio': float(burst_ratio),
+            'temporal_inter_arrival_var': float(inter_arrival_var),
+            'temporal_hours_active': int(hours_active),
+            'temporal_hour_concentration': float(hour_concentration),
+            'behavioral_unique_senders': int(unique_senders),
+            'behavioral_sender_entropy': float(sender_entropy),
+            'behavioral_unique_receivers': int(unique_receivers),
+            'behavioral_receiver_entropy': float(receiver_entropy),
+            'behavioral_direction_ratio': float(direction_ratio),
+            'value_p25': float(p25),
+            'value_p50': float(p50),
+            'value_p75': float(p75),
+            'value_p95': float(p95),
+            'value_max_spike_ratio': float(max_spike_ratio),
+            'value_median_mean_ratio': float(median_mean_ratio),
+            'value_recent_concentration': float(recent_concentration),
+            'sequence_send_back_ratio': float(send_back_ratio),
+            'sequence_cyclic_ratio': float(cyclic_ratio),
+            'sequence_repeat_receiver_ratio': float(repeat_receiver_ratio),
+        }
+    except Exception as e:
+        return _get_empty_advanced_features_wallet()
+
+
+def _get_empty_advanced_features_wallet():
+    """Return default advanced features for wallet_check"""
+    return {
+        'temporal_burst_ratio': 0.0,
+        'temporal_inter_arrival_var': 0.0,
+        'temporal_hours_active': 0,
+        'temporal_hour_concentration': 0.0,
+        'behavioral_unique_senders': 0,
+        'behavioral_sender_entropy': 0.0,
+        'behavioral_unique_receivers': 0,
+        'behavioral_receiver_entropy': 0.0,
+        'behavioral_direction_ratio': 0.0,
+        'value_p25': 0.0,
+        'value_p50': 0.0,
+        'value_p75': 0.0,
+        'value_p95': 0.0,
+        'value_max_spike_ratio': 0.0,
+        'value_median_mean_ratio': 0.0,
+        'value_recent_concentration': 0.0,
+        'sequence_send_back_ratio': 0.0,
+        'sequence_cyclic_ratio': 0.0,
+        'sequence_repeat_receiver_ratio': 0.0,
+    }
+
+
+def explain_wallet_decision(model, scaled_features, features_dict, feature_names, token="USDT", max_display=10):
+    """
+    🧠 EXPLAINABILITY - SHAP-based explanations for wallet scoring decisions
+    
+    Generates human-readable explanations for why a wallet is flagged
+    Shows feature importance and contribution to final decision
+    
+    Args:
+        model: Trained ML model
+        scaled_features: Scaled feature array for model
+        features_dict: Original features dictionary
+        feature_names: List of feature column names
+        token: Token being scored
+        max_display: Maximum features to display in explanation
+        
+    Returns:
+        Dictionary with explanation data:
+        - summary: Human-readable summary
+        - top_features: List of most important features with values
+        - contributions: Feature contributions to score (if SHAP available)
+    """
+    if not HAS_SHAP:
+        # Fallback without SHAP: just show top features
+        return {
+            'summary': "Explanation unavailable (SHAP not installed). Install with: pip install shap",
+            'top_features': [],
+            'contributions': [],
+            'method': 'fallback'
+        }
+    
+    try:
+        # Determine model type for appropriate explainer
+        if hasattr(model, 'estimators_'):
+            # RandomForest or ensemble
+            explainer = shap.TreeExplainer(model)
+        else:
+            # Generic explainer
+            explainer = shap.KernelExplainer(
+                model.predict_proba if hasattr(model, 'predict_proba') else model.predict,
+                scaled_features[:min(100, len(scaled_features))]  # Use sample for background
+            )
+        
+        # Compute SHAP values
+        shap_values = explainer.shap_values(scaled_features)
+        
+        # Handle multi-class (shap_values is list for multi-class)
+        if isinstance(shap_values, list):
+            shap_values = shap_values[1]  # Use malicious class
+        
+        # Get feature importance (mean absolute SHAP value)
+        importances = np.abs(shap_values[0]).mean(axis=0) if shap_values.ndim > 1 else np.abs(shap_values)
+        
+        # Top features
+        top_indices = np.argsort(importances)[-max_display:][::-1]
+        top_features = [
+            {
+                'name': feature_names[i],
+                'importance': float(importances[i]),
+                'value': float(scaled_features[0][i]),
+                'original_value': features_dict.get(feature_names[i], 'N/A')
+            }
+            for i in top_indices
+        ]
+        
+        # Build explanation summary
+        risk_factors = []
+        safe_factors = []
+        
+        for feat in top_features[:5]:
+            if feat['value'] > 0.5:  # Normalized scale
+                risk_factors.append(f"High {feat['name'].replace('_', ' ')}")
+            else:
+                safe_factors.append(f"Low {feat['name'].replace('_', ' ')}")
+        
+        if risk_factors:
+            summary = f"Flagged due to: {', '.join(risk_factors[:2])}"
+        elif safe_factors:
+            summary = f"Safe indicators: {', '.join(safe_factors[:2])}"
+        else:
+            summary = "Mixed risk signals detected"
+        
+        return {
+            'summary': summary,
+            'top_features': top_features,
+            'contributions': [{'feature': f['name'], 'impact': f['importance']} for f in top_features],
+            'method': 'shap_tree' if hasattr(model, 'estimators_') else 'shap_kernel',
+            'model_type': type(model).__name__
+        }
+        
+    except Exception as e:
+        # Graceful fallback
+        return {
+            'summary': f"Explanation generation failed: {str(e)}",
+            'top_features': [],
+            'contributions': [],
+            'method': 'error',
+            'error': str(e)
+        }
+
+
 def generate_features(transactions, wallet_address=None):
     """
     Generate all 19 features used by the trained models.
-    Includes base features (8) + V3 poisoning features (4) + advanced heuristics (7).
+    Includes base features (8) + V3 poisoning features (4) + advanced heuristics (7) + graph features (8).
     """
     rows = []
     senders = set()
@@ -600,6 +919,12 @@ def generate_features(transactions, wallet_address=None):
         except:
             continue
 
+    # 🧠 GRAPH FEATURES - Network Intelligence
+    graph_features = _compute_graph_features(wallet_address, transactions)
+
+    # 🧠 ADVANCED FEATURES - Temporal, behavioral, value, sequence patterns
+    advanced_features = _compute_advanced_features(transactions)
+
     if len(rows) < 3:
         return {
             "wallet_age_days": 1,
@@ -620,7 +945,9 @@ def generate_features(transactions, wallet_address=None):
             "window_days": 1,
             "repeat_small_to_count": 0,
             "no_meaningful_flow": 0,
-            "short_time_window": 0
+            "short_time_window": 0,
+            **graph_features,  # Add graph features
+            **advanced_features  # Add advanced features
         }, True
 
     df = pd.DataFrame(rows)
@@ -672,7 +999,9 @@ def generate_features(transactions, wallet_address=None):
         "window_days": int(window_days),
         "repeat_small_to_count": int(repeat_small_to_count),
         "no_meaningful_flow": int(no_meaningful_flow),
-        "short_time_window": int(short_time_window)
+        "short_time_window": int(short_time_window),
+        **graph_features,  # Add graph features
+        **advanced_features  # Add advanced features
     }, False
 
 

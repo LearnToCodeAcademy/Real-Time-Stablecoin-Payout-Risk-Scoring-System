@@ -9,6 +9,12 @@ import numpy as np
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
+# 🧠 GRAPH ENGINE - Network Intelligence
+try:
+    from graph_engine import TransactionGraph
+except ImportError:
+    TransactionGraph = None
+
 API_KEY = "HP8KE56GFDIDIUCEGPAI9T5DCDYWIPYW4K"
 BASE_URL = "https://api.etherscan.io/v2/api"
 
@@ -685,6 +691,288 @@ def compute_base_features(txs, token_filter=None):
         "avg_time_between_tx_sec": df["time_diff"].mean()
     }
 
+
+def compute_graph_features(wallet, txs, token_filter=None, known_malicious=None):
+    """
+    🧠 GRAPH ENGINE - Extract network-level features
+    Computes graph metrics for transaction network analysis
+    
+    Args:
+        wallet: Wallet address (center of analysis)
+        txs: List of transaction dictionaries
+        token_filter: Optional token symbol filter
+        known_malicious: Optional list of known malicious addresses
+        
+    Returns:
+        Dictionary of graph features or empty dict if insufficient txs
+    """
+    if not TransactionGraph or not txs:
+        # Return empty graph features if graph_engine not available or no txs
+        return {
+            'graph_degree': 0,
+            'graph_pagerank': 0.0,
+            'graph_clustering': 0.0,
+            'graph_betweenness': 0.0,
+            'graph_unique_counterparties': 0,
+            'graph_inflow': 0.0,
+            'graph_outflow': 0.0,
+            'connected_to_malicious': 0
+        }
+    
+    try:
+        # Build transaction graph
+        graph = TransactionGraph(directed=True)
+        
+        # Add transactions to graph (structure: from -> to)
+        for tx in txs:
+            try:
+                # Token filtering
+                if token_filter:
+                    symbol = tx.get("tokenSymbol", "").upper().strip()
+                    if symbol != token_filter:
+                        continue
+                
+                sender = tx.get("from", "").lower()
+                recipient = tx.get("to", "").lower()
+                
+                if not sender or not recipient:
+                    continue
+                
+                amount = int(tx.get("value", 0)) / (10 ** int(tx.get("tokenDecimal", 18)))
+                graph.add_transaction(sender, recipient, amount)
+            except:
+                continue
+        
+        # Add known malicious wallets for threat analysis
+        if known_malicious:
+            graph.add_known_malicious(known_malicious)
+        
+        # Extract features for primary wallet
+        features = graph.extract_features(wallet.lower())
+        
+        return features
+        
+    except Exception as e:
+        # Graceful failure - return empty features
+        print(f"⚠️ Graph feature extraction failed for {wallet}: {e}")
+        return {
+            'graph_degree': 0,
+            'graph_pagerank': 0.0,
+            'graph_clustering': 0.0,
+            'graph_betweenness': 0.0,
+            'graph_unique_counterparties': 0,
+            'graph_inflow': 0.0,
+            'graph_outflow': 0.0,
+            'connected_to_malicious': 0
+        }
+
+
+def compute_advanced_features(txs, token_filter=None):
+    """
+    🧠 ADVANCED FEATURE ENGINEERING
+    Detects sophisticated fraud patterns through temporal, behavioral, value, and sequence analysis
+    
+    Features include:
+    - TEMPORAL: burst patterns, inter-arrival variance, active hours
+    - BEHAVIORAL: sender/receiver entropy, token switching, direction ratio
+    - VALUE: percentile txs, max spike, median/mean deviation
+    - SEQUENCE: repeated patterns, cyclic transfers, rapid send-back
+    
+    Args:
+        txs: List of transaction dictionaries
+        token_filter: Optional token to filter by
+        
+    Returns:
+        Dictionary of advanced features
+    """
+    try:
+        # Filter by token if specified
+        if token_filter:
+            filtered_txs = []
+            for tx in txs:
+                if tx.get("tokenSymbol", "").upper() == token_filter:
+                    filtered_txs.append(tx)
+            txs = filtered_txs
+        
+        if len(txs) < 3:
+            return _get_empty_advanced_features()
+        
+        # Parse transactions
+        rows = []
+        senders = []
+        receivers = []
+        values = []
+        timestamps = []
+        
+        for tx in txs:
+            try:
+                amount = int(tx.get("value", 0)) / (10 ** int(tx.get("tokenDecimal", 18)))
+                if amount <= 0:
+                    continue
+                
+                timestamp = int(tx.get("timeStamp", 0))
+                sender = tx.get("from", "").lower()
+                receiver = tx.get("to", "").lower()
+                
+                if sender and receiver:
+                    rows.append({
+                        'amount': amount,
+                        'timestamp': timestamp,
+                        'sender': sender,
+                        'receiver': receiver
+                    })
+                    senders.append(sender)
+                    receivers.append(receiver)
+                    values.append(amount)
+                    timestamps.append(timestamp)
+            except:
+                continue
+        
+        if len(rows) < 3:
+            return _get_empty_advanced_features()
+        
+        df = pd.DataFrame(rows)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        df = df.sort_values('timestamp')
+        
+        # ========== TEMPORAL FEATURES ==========
+        
+        # Time differences between consecutive transactions (burst detection)
+        time_diffs = df['timestamp'].diff().dt.total_seconds().fillna(0).values
+        
+        # Burst pattern: rapid sequence of txs (small time gaps)
+        burst_threshold = 60  # seconds
+        burst_count = np.sum(time_diffs < burst_threshold)
+        burst_ratio = burst_count / len(time_diffs) if len(time_diffs) > 0 else 0
+        
+        # Inter-arrival variance (trading pattern consistency)
+        inter_arrival_var = np.var(time_diffs[time_diffs > 0]) if np.sum(time_diffs > 0) > 1 else 0
+        
+        # Active hours distribution (when does this wallet trade)
+        active_hours = df['timestamp'].dt.hour.value_counts()
+        hours_active = len(active_hours)
+        hour_concentration = active_hours.max() / len(df) if len(df) > 0 else 0
+        
+        # ========== BEHAVIORAL FEATURES ==========
+        
+        # Sender entropy (how many unique senders)
+        unique_senders = len(set(senders))
+        sender_entropy = -np.sum((np.array(list(Counter(senders).values())) / len(senders)) * 
+                                 np.log2(np.array(list(Counter(senders).values())) / len(senders) + 1e-10))
+        
+        # Receiver entropy (how many unique receivers)
+        unique_receivers = len(set(receivers))
+        receiver_entropy = -np.sum((np.array(list(Counter(receivers).values())) / len(receivers)) *
+                                   np.log2(np.array(list(Counter(receivers).values())) / len(receivers) + 1e-10))
+        
+        # Direction ratio (outgoing vs incoming)
+        direction_ratio = unique_senders / unique_receivers if unique_receivers > 0 else unique_senders
+        
+        # ========== VALUE-BASED FEATURES ==========
+        
+        # Percentile values
+        p25 = np.percentile(values, 25)
+        p50 = np.percentile(values, 50)
+        p75 = np.percentile(values, 75)
+        p95 = np.percentile(values, 95)
+        
+        # Max spike ratio (largest tx / median tx)
+        max_spike_ratio = np.max(values) / (p50 if p50 > 0 else 1)
+        
+        # Median vs mean deviation
+        mean_val = np.mean(values)
+        median_val = p50
+        median_mean_ratio = mean_val / (median_val if median_val > 0 else 1)
+        
+        # Value concentration in recent transactions
+        recent_values = df['amount'].iloc[-5:].sum()
+        total_values = df['amount'].sum()
+        recent_concentration = recent_values / (total_values if total_values > 0 else 1)
+        
+        # ========== SEQUENCE FEATURES ==========
+        
+        # Rapid send-back pattern (sender becomes receiver and vice versa)
+        send_back_count = 0
+        for i in range(len(df) - 1):
+            curr_sender = df.iloc[i]['sender']
+            curr_receiver = df.iloc[i]['receiver']
+            next_sender = df.iloc[i + 1]['sender']
+            next_receiver = df.iloc[i + 1]['receiver']
+            
+            if (curr_sender == next_receiver and curr_receiver == next_sender):
+                send_back_count += 1
+        
+        send_back_ratio = send_back_count / max(len(df) - 1, 1)
+        
+        # Cyclic pattern detection (same flow multiple times)
+        flow_pairs = [(row['sender'], row['receiver']) for _, row in df.iterrows()]
+        flow_counts = Counter(flow_pairs)
+        cyclic_flows = sum(1 for count in flow_counts.values() if count > 2)
+        cyclic_ratio = cyclic_flows / len(flow_counts) if len(flow_counts) > 0 else 0
+        
+        # Repeated recipients (washing pattern)
+        repeat_receiver_ratio = len([c for c in Counter(receivers).values() if c > 3]) / unique_receivers if unique_receivers > 0 else 0
+        
+        from collections import Counter
+        
+        return {
+            # Temporal
+            'temporal_burst_ratio': float(burst_ratio),
+            'temporal_inter_arrival_var': float(inter_arrival_var),
+            'temporal_hours_active': int(hours_active),
+            'temporal_hour_concentration': float(hour_concentration),
+            
+            # Behavioral
+            'behavioral_unique_senders': int(unique_senders),
+            'behavioral_sender_entropy': float(sender_entropy),
+            'behavioral_unique_receivers': int(unique_receivers),
+            'behavioral_receiver_entropy': float(receiver_entropy),
+            'behavioral_direction_ratio': float(direction_ratio),
+            
+            # Value
+            'value_p25': float(p25),
+            'value_p50': float(p50),
+            'value_p75': float(p75),
+            'value_p95': float(p95),
+            'value_max_spike_ratio': float(max_spike_ratio),
+            'value_median_mean_ratio': float(median_mean_ratio),
+            'value_recent_concentration': float(recent_concentration),
+            
+            # Sequence
+            'sequence_send_back_ratio': float(send_back_ratio),
+            'sequence_cyclic_ratio': float(cyclic_ratio),
+            'sequence_repeat_receiver_ratio': float(repeat_receiver_ratio),
+        }
+        
+    except Exception as e:
+        print(f"⚠️ Advanced feature extraction failed: {e}")
+        return _get_empty_advanced_features()
+
+
+def _get_empty_advanced_features():
+    """Return empty/default advanced features"""
+    return {
+        'temporal_burst_ratio': 0.0,
+        'temporal_inter_arrival_var': 0.0,
+        'temporal_hours_active': 0,
+        'temporal_hour_concentration': 0.0,
+        'behavioral_unique_senders': 0,
+        'behavioral_sender_entropy': 0.0,
+        'behavioral_unique_receivers': 0,
+        'behavioral_receiver_entropy': 0.0,
+        'behavioral_direction_ratio': 0.0,
+        'value_p25': 0.0,
+        'value_p50': 0.0,
+        'value_p75': 0.0,
+        'value_p95': 0.0,
+        'value_max_spike_ratio': 0.0,
+        'value_median_mean_ratio': 0.0,
+        'value_recent_concentration': 0.0,
+        'sequence_send_back_ratio': 0.0,
+        'sequence_cyclic_ratio': 0.0,
+        'sequence_repeat_receiver_ratio': 0.0,
+    }
+
 # =========================================================
 # ENTERPRISE FRAUD DETECTION (STRIPE-GRADE)
 # ========================================================
@@ -1215,7 +1503,13 @@ def extract_features_for_version(config, version, use_pool):
             if not base:
                 continue
 
-            row = {"wallet": w, "token": token.lower(), **base}
+            # 🧠 Add graph features (network intelligence)
+            graph_features = compute_graph_features(w, txs, token_filter=token)
+
+            # 🧠 Add advanced temporal/behavioral features
+            advanced_features = compute_advanced_features(txs, token_filter=token)
+
+            row = {"wallet": w, "token": token.lower(), **base, **graph_features, **advanced_features}
 
             # label rules by version
             if version == "v0":
