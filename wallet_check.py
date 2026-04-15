@@ -28,10 +28,10 @@ BASE_URL = "https://api.etherscan.io/api"
 
 MODEL_DIR = "models"
 
-SUPPORTED_TOKENS = ["USDT", "USDC", "BUSD", "DAI", "USDP", "TUSD"]
+SUPPORTED_TOKENS = ["USDT", "USDC", "BUSD", "DAI", "USDP", "TUSD"]  # Only trained tokens have models
 
-# [EXPANSION] All supported tokens for detection/reporting (50+ tokens)
-# TRAINED=6 (marked with *), WATCHONLY=44+ for detection-only mode
+# [EXPANSION] All supported tokens for detection/reporting (54 tokens)
+# TRAINED=6 (marked with *), WATCHONLY=48 for detection-only mode
 ALL_TOKENS = {
     # ===== STABLECOINS: Trained (6) + Watch-Only (18) =====
     "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",  # * Tether (TRAINED)
@@ -649,9 +649,8 @@ def score_wallet(address):
 
         features = get_features(address, token)
 
-
-
-        if features is not None and token in MODELS:
+        # Check if model is available (SUPPORTED_TOKENS, not MODELS dict which uses lazy loading)
+        if features is not None and token in SUPPORTED_TOKENS:
 
             db_time = time.time() - db_start
 
@@ -662,7 +661,8 @@ def score_wallet(address):
             df_input = align_features_for_token(token, features)
 
             try:
-
+                # Ensure model is loaded
+                load_model_for_token(token)
                 scaled = SCALERS[token].transform(df_input)
 
             except Exception as e:
@@ -786,11 +786,11 @@ def score_wallet(address):
 
 
 
-    if token not in MODELS:
+    if token not in SUPPORTED_TOKENS:
 
-        decision, reason = "REVIEW", "No model available for detected token"
+        decision, reason = "REVIEW", f"Model not available for {token}"
 
-        print(f"[WARN] No model for {token} ? REVIEW")
+        print(f"[WARN] No model for {token} - token not in SUPPORTED_TOKENS")
 
         print(f"Decision: {decision}")
 
@@ -798,6 +798,14 @@ def score_wallet(address):
 
         print(f"? TOTAL TIME: {time.time() - total_start:.3f}s")
 
+        return
+
+    # Ensure model is loaded before inference
+    try:
+        load_model_for_token(token)
+    except Exception as e:
+        print(f"[ERROR] Failed to load model for {token}: {e}")
+        print(f"? TOTAL TIME: {time.time() - total_start:.3f}s")
         return
 
 

@@ -39,9 +39,30 @@ os.makedirs("datasets", exist_ok=True)
 os.makedirs("public address dataset", exist_ok=True)
 
 # =========================================================
-# 🔥 TOKENS TO PROCESS
+# 🔥 TOKENS TO PROCESS (54 total: 6 trained + 48 detection)
 # =========================================================
-TOKENS = ["USDT", "USDC", "BUSD", "DAI", "USDP", "TUSD"]
+# TRAINED: Full ML scoring models available
+TRAINED_TOKENS = ["USDT", "USDC", "BUSD", "DAI", "USDP", "TUSD"]
+
+# WATCHONLY: Detection-only tokens (no models yet, different attacker patterns)
+WATCHONLY_TOKENS = [
+    # Stablecoins (18)
+    "FRAX", "USDX", "GUSD", "LUSD", "MIM", "USDD", "EURS", "DOLA", 
+    "GOHM", "USDCE", "ALUSD", "cUSDT",
+    # DeFi (12)
+    "AAVE", "COMP", "SNX", "UNI", "LINK", "SUSHI", "CRV", "1INCH", "YFI", "MKR", "BAL", "AURA",
+    # ETH/L2 (9)
+    "WETH", "MATIC", "LDO", "ARB", "OP", "GMX", "SOL", "MANTLE", "LINEA",
+    # Wrapped (8)
+    "WBTC", "cBTC", "stETH", "rswETH", "CBETH", "LST", "cbRES", "swETH",
+    # Meme/Other (7)
+    "DOGE", "SHIB", "PEPE", "FLOKI", "BONK", "WLD", "SAFE",
+    # Non-ERC20 wrapped versions
+    "ETH",  # Native Ethereum
+]
+
+# All tokens combined for full dataset generation
+TOKENS = TRAINED_TOKENS + WATCHONLY_TOKENS
 
 # Safety limits
 # Limit number of transactions processed per wallet to avoid very long loops
