@@ -306,72 +306,48 @@ else:
 
 
 
-def apply_rule_based_filters(features, prob_malicious, prob_poisoned):
-
+def apply_rule_based_filters(features, prob_malicious, prob_poisoned, token="USDT", token_type="stablecoin", type_thresholds=None):
     """
-
     Apply deterministic rule-based checks to catch known attack patterns.
-
+    Uses TOKEN_TYPE_THRESHOLDS for type-aware detection.
+    
     Returns: (override_decision, override_confidence, rule_fired)
-
     """
-
+    if type_thresholds is None:
+        type_thresholds = TOKEN_TYPE_THRESHOLDS.get(token_type, TOKEN_TYPE_THRESHOLDS["stablecoin"])
     
-
     # Rule 1: NEW WALLET (< 7 days) with ANY suspicious activity
-
     if features.get("wallet_age_days", 100) <= 7:
-
         if prob_malicious > 0.3 or prob_poisoned > 0.2:
-
-            return "REVIEW", 0.9, "new_wallet_suspicious"
-
+            return "REVIEW", 0.9, f"new_wallet_suspicious ({token})"
     
-
     # Rule 2: ULTRA-HIGH FREQUENCY + LOW VALUE (classic spam)
-
-    if features.get("tx_per_day", 0) > 50 and features.get("avg_tx", 1000) < 1.0:
-
-        return "BLOCK", 0.95, "spam_pattern_high_freq_low_value"
-
+    # Apply type-specific activity thresholds
+    max_daily = type_thresholds.get("max_daily_activity", 500)
+    if features.get("tx_per_day", 0) > max_daily and features.get("avg_tx", 1000) < type_thresholds.get("min_transaction_value", 0.01):
+        return "BLOCK", 0.95, f"spam_pattern_high_freq_low_value ({token} [{token_type}])"
     
-
     # Rule 3: NO MEANINGFUL ACTIVITY (all dust/zero transactions)
-
-    if features.get("avg_tx", 1000) < 0.001 and features.get("tx_frequency", 0) > 10:
-
-        return "BLOCK", 0.85, "no_meaningful_activity"
-
+    min_tx = type_thresholds.get("min_transaction_value", 0.01)
+    if features.get("avg_tx", 1000) < min_tx and features.get("tx_frequency", 0) > 10:
+        return "BLOCK", 0.85, f"no_meaningful_activity ({token})"
     
-
     # Rule 4: INSTANT TRANSACTIONS (avg time between tx < 10 seconds = bots)
-
     if features.get("avg_time_between_tx_sec", 100000) < 10 and features.get("tx_frequency", 0) > 5:
-
-        return "BLOCK", 0.80, "bot_activity_instant_txs"
-
+        return "BLOCK", 0.80, f"bot_activity_instant_txs ({token})"
     
-
     # Rule 5: RECENT SPIKE IN ACTIVITY (dormant wallet suddenly active)
-
-    if (features.get("recent_tx", 0) > features.get("avg_tx", 1) * 10 and 
-
+    # Apply type-specific spike multiplier
+    spike_mult = type_thresholds.get("unusual_tx_spike_multiplier", 10.0)
+    if (features.get("recent_tx", 0) > features.get("avg_tx", 1) * spike_mult and 
         features.get("wallet_age_days", 1) > 365 and
-
         features.get("tx_per_min", 0) > 0.1):
-
-        return "REVIEW", 0.75, "unusual_spike_old_wallet"
-
+        return "REVIEW", 0.75, f"unusual_spike_old_wallet ({token} spike_mult={spike_mult})"
     
-
     # Rule 6: ABNORMAL HOUR ACTIVITY (> 20 txs/hour = unusual)
-
     if features.get("tx_per_hour", 0) > 20:
-
-        return "REVIEW", 0.70, "abnormal_tx_rate_hourly"
-
+        return "REVIEW", 0.70, f"abnormal_tx_rate_hourly ({token})"
     
-
     return None, None, None
 
 
@@ -388,11 +364,20 @@ def classify_decision(prob_malicious, prob_poisoned, conf, features, token="USDT
     """
     Classify wallet risk with TOKEN-SPECIFIC thresholds.
     Different tokens have different attacker profiles and risk models.
+    
+    Uses:
+    1. TOKEN_SCORING_RULES for trained tokens (USDT, USDC, etc.)
+    2. TOKEN_TYPE_THRESHOLDS for watchonly tokens based on type
+    3. Rule-based heuristics for deterministic patterns
     """
     # Get token-specific rules (default to USDT if not found)
     rules = TOKEN_SCORING_RULES.get(token, TOKEN_SCORING_RULES["USDT"])
     malicious_thresh = rules.get("malicious_threshold", 0.88)
     poisoned_thresh = rules.get("poisoned_threshold", 0.75)
+    
+    # Get token type for additional context (used for watchonly tokens)
+    token_type = TOKEN_TYPE_CLASSIFICATION.get(token, "unknown")
+    type_thresholds = TOKEN_TYPE_THRESHOLDS.get(token_type, TOKEN_TYPE_THRESHOLDS["stablecoin"])
     
     # [CRITICAL] Check VERY HIGH model confidence FIRST (skip rules if model is very certain)
     if prob_poisoned >= poisoned_thresh:
@@ -402,9 +387,10 @@ def classify_decision(prob_malicious, prob_poisoned, conf, features, token="USDT
         return "BLOCK", f"Malicious {token} wallet (high confidence - {rules.get('description')}) | Threats: {', '.join(rules.get('primary_threats', []))}"
 
     # Then apply rule-based filters for lower confidence cases (defensive heuristics)
-    rule_decision, rule_conf, rule_name = apply_rule_based_filters(features, prob_malicious, prob_poisoned)
+    # Apply type-aware thresholds to rules
+    rule_decision, rule_conf, rule_name = apply_rule_based_filters(features, prob_malicious, prob_poisoned, token, token_type, type_thresholds)
     if rule_decision:
-        return rule_decision, f"{rule_name} (rule-based check for {token})"
+        return rule_decision, f"{rule_name} (rule-based check for {token} [{token_type}])"
 
     if low_data:
         return "REVIEW", "Insufficient data"
@@ -425,32 +411,9 @@ def classify_decision(prob_malicious, prob_poisoned, conf, features, token="USDT
     # Medium-high malicious
     if prob_malicious >= (malicious_thresh - 0.08):
         return "BLOCK", f"Malicious {token} wallet (high confidence)"
-
-
-
+    
     elif prob_malicious >= 0.5:
-
         return "REVIEW", "Moderate malicious risk"
-
-
-
-    return "ALLOW", "Low risk"
-
-
-
-    # ? THEN MALICIOUS
-
-    if prob_malicious >= 0.8:
-
-        return "BLOCK", "High malicious risk"
-
-
-
-    elif prob_malicious >= 0.5:
-
-        return "REVIEW", "Moderate malicious risk"
-
-
 
     return "ALLOW", "Low risk"
 
