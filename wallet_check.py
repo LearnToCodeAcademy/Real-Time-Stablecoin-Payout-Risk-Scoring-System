@@ -636,17 +636,13 @@ def score_wallet(address):
 
     token = detect_token(txs)
 
-
-
     if not token:
+        print(f"[ERROR] Could not detect token from {len(txs)} transactions")
+        print(f"[ERROR] Supported tokens: {SUPPORTED_TOKENS}")
+        print(f"[ERROR] Skipping wallet - cannot determine which model to use")
+        return
 
-        print("[WARN] Token not detected ? defaulting to USDT")
-
-        token = "USDT"
-
-
-
-    print(f"MOST USE TOKEN: {token}")
+    print(f"[OK] Using token model: {token}")
 
 
 
@@ -681,17 +677,16 @@ def score_wallet(address):
 
 
     if low_data:
-
-        decision, reason = "REVIEW", "Insufficient transaction data"
-
-        print("Low data ? REVIEW")
-
+        print(f"[WARN] Insufficient valid {token} transaction data (< 3 transactions)")
+        print(f"[WARN] Wallet may have very few confirmed token transfers")
+        decision, reason = "REVIEW", f"Insufficient {token} transaction data (< 3 tx)"
+        print(f"\n? RESULT (INSUFFICIENT DATA)")
+        print(f"Wallet: {address}")
+        print(f"Token: {token}")
         print(f"Decision: {decision}")
-
         print(f"Reason: {reason}")
-
+        print("-" * 40)
         print(f"? TOTAL TIME: {time.time() - total_start:.3f}s")
-
         return
 
 
