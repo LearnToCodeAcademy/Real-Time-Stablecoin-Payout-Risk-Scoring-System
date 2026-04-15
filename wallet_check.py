@@ -30,6 +30,74 @@ MODEL_DIR = "models"
 
 SUPPORTED_TOKENS = ["USDT", "USDC", "BUSD", "DAI", "USDP", "TUSD"]
 
+# [EXPANSION] All supported tokens for detection/reporting (50+ tokens)
+# TRAINED=6 (marked with *), WATCHONLY=44+ for detection-only mode
+ALL_TOKENS = {
+    # ===== STABLECOINS: Trained (6) + Watch-Only (18) =====
+    "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",  # * Tether (TRAINED)
+    "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",  # * USD Coin (TRAINED)
+    "DAI":  "0x6B175474E89094C44Da98b954EedeAC495271d0F",  # * DAI (TRAINED)
+    "BUSD": "0x4Fabb145d64652a948d72533023f6E7A623C7C53",  # * Binance USD (TRAINED)
+    "USDP": "0x8E870D67F660D95d5be2D627f142b3d3C9145e9D",  # * Paxos USD (TRAINED)
+    "TUSD": "0x0000000000085d4780B73119b8B580991DEe8d52",  # * True USD (TRAINED)
+    "FRAX": "0x853d955aCEf822Db058eb8505911ED77F175b999",  # Frax
+    "USDX": "0xEB269732ab75A6fD61Ea60b06Fe994cD32a83549",  # Usdx
+    "GUSD": "0x056Fd409E1d7a124BD7017459dFEa2F387b6d5Cd",  # Gemini USD
+    "LUSD": "0x5f98805A4E8f28Fb3fBEa8E3302F36A6c4089d5d",  # Liquity USD
+    "MIM":  "0x99D8a9C45b2ecA8864373A26D1459e3Dff1e17F3",  # Magic Internet Money
+    "USDD": "0x0C10bF8FcB7BEe7545050DC9fBa090257BF378C1",  # USDD (Tron Stablecoin)
+    "EURS": "0xdB25f211AB05b1c97D595fc342622f313F7ba4A8",  # EURS (Stasis Euro)
+    "DOLA": "0x865377367054516e404113458AfE5F5B352318De",  # dForce USD (Dola)
+    "GOHM": "0x0ab87046fBb341D058F17CBC4c1133F25a20a52f",  # Governance Ohm
+    "USDCE":"0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", # USD Coin (Polygon)
+    "ALUSD":"0xBC6DA0FE9aD5f3b0d56f3302D25CD78a3891AB28", # Alchemix USD
+    "cUSDT":"0xf650C3d88D12dB855b8bf7D11Be6C55A660128C0",  # cUSDT (Compound)
+    
+    # ===== DeFi TOKENS: Watch-Only (12) =====
+    "AAVE": "0x7Fc66500c84A76Ad7e9c93437E434122A1f9AcDd",  # Aave
+    "COMP": "0xc00e94cb662c3520282e6f5717214200A2f38f2D",  # Compound
+    "SNX":  "0xC011a73ee3C7781c43Ef8664CaCBA5Bfb4B5C91d",  # Synthetix
+    "UNI":  "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",  # Uniswap
+    "LINK": "0x514910771AF9ca656af840dff83E8264EcF986CA",  # Chainlink
+    "SUSHI":"0x6B3595068778DD592e39A122f4f5a5cF09C90fE2",  # SushiSwap
+    "CRV":  "0xD533a949740bb3306d119CC777fa900bA034cd52",  # Curve
+    "1INCH":"0x111111111117dC0aa78b770fA6A738034120C302",  # 1Inch
+    "YFI":  "0x0bc529c00C6401aEA6830052eCs38aEA4104B4De",  # yearn.finance
+    "MKR":  "0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2",  # Maker
+    "BAL":  "0xba100000625a3754423f8282f6b5d4d66c75da24",  # Balancer
+    "AURA": "0xC0c293ce456fF0ED870ADd98bc6A6B9DD3B2E76d",  # Aura
+    
+    # ===== ETH/L2 TOKENS: Watch-Only (9) =====
+    "WETH": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",  # Wrapped Ether
+    "MATIC": "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0",  # Polygon (Matic)
+    "LDO":  "0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32",  # Lido
+    "ARB":  "0xB50721BCF8d664c30412Cfbc6cf7a15145234ad1",  # Arbitrum
+    "OP":   "0x4200000000000000000000000000000000000042",  # Optimism
+    "GMX":  "0xfc5A1A6EB076a2C7aD06eD22C90d3E710233C904",  # GMX
+    "SOL":  "0xD31a59c85aE9D8edEFeC411D448f90541670C06d",  # Wrapped SOL
+    "MANTLE":"0x78c1b0C915c4FAA5FffA6CEB6a922F73389E405B",  # Mantle
+    "LINEA":"0x0a6ce4409d3a4f56a928ac6302e7f2e4f19a8db8",  # Linea
+    
+    # ===== WRAPPED TOKENS: Watch-Only (8) =====
+    "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",  # Wrapped Bitcoin
+    "cBTC": "0x7e7E112A68d8D2E221E11047a72fFC1d8EF3467f",  # cBTC
+    "stETH":"0xae7ab96520DE3A18E5e111B5eaAb095312D7fE84",  # Lido staked ETH
+    "rswETH":"0xA1290d69c65A6Fe4DF752f95823fae25cB99e5A7",  # Restake Staked ETH
+    "CBETH":"0xBe9895146f7AF43049ca1c1AE358B0541ea49704",  # Coinbase staked ETH
+    "LST":  "0x1f32b1c2345538c0c6f582fcB022739c4A194Ebb",  # Liquid Stake Token
+    "cbRES":"0x99cbdb6Ee0E6472Cb3c177C5D8d8fC1d9Fe6E6Ee",  # Coinbase Reward ETH
+    "swETH":"0xf951E335afb289fa71f856386d3D3E74Ffb50Ea3",  # Swell staked ETH
+    
+    # ===== MEME/OTHER TOKENS: Watch-Only (7) =====
+    "DOGE": "0xBA2aE424d960c26247Dd6c32edC70B295c744C43",  # Dogecoin (wrapped)
+    "SHIB": "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE",  # Shiba Inu
+    "PEPE": "0x6982508145454Ce894aaEc87E1Ac8D4e98E9DB4d",  # Pepe
+    "FLOKI":"0xcf0C122c6b5E2485eb96245300256c8F63F20971",  # Floki
+    "BONK": "0xB0B195aEFA3650A6908f15CdAc7D92F90912C595",  # Bonk (wrapped)
+    "WLD":  "0x163f8C2467924be0ae7E9ACaD2d45CE03d395278",  # World Coin
+    "SAFE": "0x5aFb0a56a78D6FA7d4f7850B0DF9e11AD015d211",  # Safe (Gnosis)
+}
+
 # [CRITICAL] Known stablecoin contract addresses - SKIP THESE
 TOKEN_CONTRACTS = {
     "0xdAC17F958D2ee523a2206206994597C13D831ec7": "USDT",  # USDT contract
@@ -323,30 +391,43 @@ def fetch_transactions(address):
 # =============================
 
 def detect_token(transactions):
-
+    """
+    Detect token from transaction list.
+    - Checks top 20 transactions
+    - Reports which tokens found (both TRAINED and WATCHONLY)
+    - Returns token if in TRAINED_TOKENS list, None otherwise
+    """
     counts = {}
-
-    supported = list(MODELS.keys()) if MODELS else SUPPORTED_TOKENS
-
-
-
-    for tx in transactions:
-
+    
+    # Check top 20 most recent transactions
+    for tx in transactions[:20]:
         if isinstance(tx, dict):
-
             sym = tx.get("tokenSymbol")
-
             if isinstance(sym, str):
-
                 sym = sym.upper().strip()
-
-            if sym in supported:
-
-                counts[sym] = counts.get(sym, 0) + 1
-
-
-
-    return max(counts, key=counts.get) if counts else None
+                # Check against expanded tokens list
+                if sym in ALL_TOKENS:
+                    counts[sym] = counts.get(sym, 0) + 1
+    
+    if not counts:
+        print("[WARN] No recognized tokens found in transaction history")
+        return None
+    
+    # Find most common token
+    detected_token = max(counts, key=counts.get)
+    count = counts[detected_token]
+    
+    # Check if it's a trained token
+    if detected_token in SUPPORTED_TOKENS:
+        print(f"[OK] Found TRAINED token: {detected_token} (count: {count}) - Scoring enabled")
+        return detected_token
+    else:
+        # It's a watchonly token - report but don't score
+        other_tokens = [f"{t} ({counts[t]})" for t in sorted(counts.keys()) if t != detected_token]
+        other_str = f" | Other detected: {', '.join(other_tokens)}" if other_tokens else ""
+        print(f"[WARN] Detected token: {detected_token} (count: {count}) - UNSUPPORTED (no model trained){other_str}")
+        print(f"[SKIP] {detected_token} wallet scoring disabled - model not available")
+        return None
 
 
 
@@ -646,25 +727,17 @@ def score_wallet(address):
 
     print(f"? API TIME: {time.time() - api_start:.3f}s")
 
-
-
     if not txs:
-
         print("No transactions")
-
         return
-
-
 
     token = detect_token(txs)
-
     if not token:
-        print(f"[ERROR] Could not detect token from {len(txs)} transactions")
-        print(f"[ERROR] Supported tokens: {SUPPORTED_TOKENS}")
-        print(f"[ERROR] Skipping wallet - cannot determine which model to use")
+        print(f"[ERROR] Scoring skipped - no supported token model available")
+        print(f"? TOTAL TIME: {time.time() - total_start:.3f}s")
         return
 
-    print(f"[OK] Using token model: {token}")
+    print(f"[OK] Proceeding with {token} model scoring...")
 
 
 
