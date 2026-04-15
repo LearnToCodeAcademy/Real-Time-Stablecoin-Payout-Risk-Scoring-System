@@ -176,7 +176,21 @@ def apply_rule_based_filters(features, prob_malicious, prob_poisoned):
 
 def classify_decision(prob_malicious, prob_poisoned, conf, features, low_data=False):
 
-    # First, apply rule-based filters (defensive blocking)
+    # [CRITICAL] Check VERY HIGH model confidence FIRST (skip rules if model is very certain)
+
+    if prob_poisoned >= 0.7:
+
+        return "BLOCK", "Poisoned wallet (high confidence - address spoofing)"
+
+    
+
+    if prob_malicious >= 0.9:
+
+        return "BLOCK", "Malicious wallet (very high confidence - phishing/scam)"
+
+    
+
+    # Then apply rule-based filters for lower confidence cases (defensive heuristics)
 
     rule_decision, rule_conf, rule_name = apply_rule_based_filters(features, prob_malicious, prob_poisoned)
 
@@ -210,11 +224,29 @@ def classify_decision(prob_malicious, prob_poisoned, conf, features, low_data=Fa
 
 
 
-    # ? POISONING IS HIGHEST PRIORITY
+    # ? MEDIUM-HIGH POISONING
 
     if prob_poisoned >= 0.5:
 
-        return "BLOCK", "Poisoned wallet (address spoofing)"
+        return "BLOCK", "Poisoned wallet (medium-high confidence)"
+
+
+
+    # ? MEDIUM-HIGH MALICIOUS
+
+    if prob_malicious >= 0.8:
+
+        return "BLOCK", "Malicious wallet (high confidence)"
+
+
+
+    elif prob_malicious >= 0.5:
+
+        return "REVIEW", "Moderate malicious risk"
+
+
+
+    return "ALLOW", "Low risk"
 
 
 
