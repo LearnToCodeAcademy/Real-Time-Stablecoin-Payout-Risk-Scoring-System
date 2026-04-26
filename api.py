@@ -169,7 +169,7 @@ def score_wallet_endpoint(request: WalletScoringRequest):
         if not request.address.startswith("0x") or len(request.address) != 42:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid address format. Expected 0x{42-2 alphanumeric characters}"
+                detail="Invalid address format. Expected 0x<40 hex characters>"
             )
         
         logger.info(f"Scoring wallet {request.address[:10]}... [token={request.manual_token}]")

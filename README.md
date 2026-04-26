@@ -1,3 +1,364 @@
+# 🔐 Real-Time Stablecoin Payout Risk Scoring System
+
+## 🚀 Overview
+
+A production-grade risk scoring engine designed to **detect high-risk blockchain wallets before transactions occur**.
+
+The system combines:
+
+* behavioral analytics
+* machine learning
+* rule-based detection
+* graph/network intelligence
+
+to deliver **real-time, pre-transaction risk decisions**.
+
+---
+
+## 💣 Problem
+
+Stablecoin and crypto payments are **irreversible**, making them a prime target for:
+
+* address poisoning attacks
+* fraudulent wallet behavior
+* bot-driven transaction spam
+* coordinated wallet clusters
+* fast-evolving adversarial strategies
+
+Existing solutions are:
+
+* reactive (detect after funds are lost)
+* dependent on static blacklists
+* unable to adapt to new attack patterns
+
+---
+
+## 🎯 Objective
+
+Build a **low-latency, adversarial-aware risk engine** that evaluates wallet risk **before funds are sent**.
+
+---
+
+## ⚙️ System Architecture
+
+```id="xtzf8l"
+Wallet Input
+↓
+Feature Extraction (Python)
+↓
+Feature Store (PostgreSQL + Cache)
+↓
+ML Risk Model
+↓
+Rule-Based Engine
+↓
+Graph Intelligence (Cluster Detection)
+↓
+Decision Engine (ALLOW / REVIEW / BLOCK)
+↓
+API Layer (Go)
+↓
+Client (Extension / Dashboard)
+```
+
+---
+
+## 🧠 Core Capabilities
+
+### 🔍 Behavioral Analysis
+
+* wallet age & lifecycle detection
+* transaction frequency & velocity modeling
+* value distribution analysis
+* temporal activity tracking
+
+---
+
+### 🧠 Hybrid Detection Engine
+
+* machine learning (probabilistic scoring)
+* rule-based heuristics (deterministic detection)
+* graph-based intelligence (network-level risk)
+
+---
+
+### 🌐 Graph Intelligence (Key Strength)
+
+* detects interconnected wallets
+* identifies coordinated fraud clusters
+* supports future risk propagation
+* exposes hidden relationships between wallets
+
+---
+
+### ⚡ Real-Time Risk Scoring
+
+* cache-first architecture
+* <200ms latency target
+* instant scoring on cache hit
+* dynamic feature computation on cache miss
+
+---
+
+### 🗄 Feature Store System
+
+* PostgreSQL-backed persistent storage
+* in-memory caching for near O(1) lookup
+* automatic feature expansion per wallet
+
+---
+
+### 🔒 Decision Engine
+
+Outputs:
+
+```id="4f2o3l"
+risk_probability: 0.87
+decision: BLOCK
+confidence: 0.74
+```
+
+Decision logic:
+
+* BLOCK → high-risk
+* REVIEW → uncertain
+* ALLOW → safe
+
+---
+
+## 🌐 Client Layer — Browser Extension
+
+A user-facing security layer that brings **real-time fraud detection directly to end users**.
+
+---
+
+## 🔐 Extension Modes (Privacy-First Architecture)
+
+The extension is designed with **progressive capability levels**, ensuring **maximum user trust and minimal permissions by default**.
+
+---
+
+### 🟢 V1 — Privacy Mode (Default)
+
+* no login required
+* no data stored
+* no tracking
+* no browser permissions requested
+
+**Capabilities:**
+
+* manual wallet input (paste address)
+* instant risk scoring via API
+* structured risk explanation
+
+**Use Case:**
+
+* quick verification before sending funds
+
+---
+
+### 🟡 V2 — Smart Detection Mode (Optional)
+
+Activated only when the user explicitly enables it.
+
+**Permissions required:**
+
+* activeTab
+* scripting
+
+**Capabilities:**
+
+* automatically detects wallet addresses on webpages
+* highlights risky wallets in real time
+* provides inline warnings
+
+**Purpose:**
+
+* passive protection while browsing
+
+---
+
+### 🔴 V3 — Transaction Protection Mode (Advanced)
+
+Optional advanced protection layer.
+
+**Capabilities:**
+
+* detects wallet usage during transaction flow
+* warns users before confirming transactions
+* provides real-time decision feedback
+
+**Purpose:**
+
+* prevent irreversible fund loss at the final step
+
+---
+
+## ⚙️ Permission Model
+
+The system follows a **least-privilege security design**:
+
+* default mode requires **zero permissions**
+* advanced features require **explicit user consent**
+* permissions are requested **only when needed**
+
+---
+
+## 🧠 Example Output
+
+```id="xu8ezt"
+🚨 WARNING: High-Risk Wallet
+
+Wallet: 0xABC...
+Risk Score: 0.87
+Decision: BLOCK
+
+Analysis:
+- Linked to suspicious wallet cluster
+- High-frequency burst activity detected
+- Pattern consistent with bot behavior
+
+⚡ Checked in 0.18s
+```
+
+---
+
+## 🛠 Tech Stack
+
+### Data & ML
+
+* Python
+* pandas
+* scikit-learn
+
+### Data Source
+
+* Etherscan API
+
+### Backend
+
+* Go (planned API layer)
+
+### Client
+
+* Browser Extension
+
+### Infrastructure
+
+* PostgreSQL (feature store)
+* RDP (pipeline execution)
+
+---
+
+## 📊 System Capabilities
+
+* 50,000+ wallets analyzed
+* graph-based wallet clustering
+* anomaly detection (spam, bursts, repetition)
+* hybrid ML + rules + graph detection
+* dataset versioning (V0–V4)
+* real-time scoring pipeline
+* persistent feature storage
+
+---
+
+## 🧠 Machine Learning Pipeline
+
+### Data Versions
+
+* V0 → baseline safe
+* V1 → malicious (high-confidence)
+* V2 → expanded malicious
+* V3 → poisoning behavior
+* V4 → high-confidence safe
+
+---
+
+### Training Strategy
+
+* weighted datasets (V1/V3 prioritized)
+* class imbalance handling
+* multi-model training (RF / XGB / LGB)
+* automatic best model selection
+
+---
+
+## ⚠️ Challenges
+
+### Cold Start
+
+* low-data wallets
+* handled via heuristic signals
+
+### Label Quality
+
+* weak supervision
+* future: integrate verified fraud datasets
+
+### Adversarial Drift
+
+* attackers adapt behavior
+* requires continuous retraining
+
+### Scalability
+
+* large-scale wallet expansion is time-intensive
+* requires optimization for higher throughput
+
+---
+
+## 🚧 Next Evolution
+
+### Data
+
+* improve labeling quality
+* integrate external fraud intelligence
+* expand dataset coverage
+
+### ML
+
+* multi-token generalization
+* improve recall for fraud detection
+* compare labeling strategies
+
+### System
+
+* Redis-like caching layer
+* optimize latency
+* production API deployment
+
+### Client
+
+* enhanced extension UX
+* real-time detection improvements
+* transaction-level protection
+
+---
+
+## ⚡ Summary
+
+This system:
+
+* evaluates wallet risk using live blockchain data
+* combines ML + rules + graph intelligence
+* delivers real-time decisions before transactions
+* enables proactive fraud prevention
+* integrates directly into user workflows
+
+---
+
+## 💯 Final Positioning
+
+A **pre-transaction risk intelligence layer for crypto payments**, bridging:
+
+* behavioral analytics
+* machine learning
+* graph-based intelligence
+* real-time decision systems
+* user-facing protection
+
+---
+
 # 🔐 Real-Time Stablecoin & Token Payout Risk Scoring System
 
 ## System Status: ✅ PRODUCTION READY — 54 TOKENS, 100% COVERAGE, REAL-TIME STREAMING

@@ -8,6 +8,7 @@ import time
 import numpy as np
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
+from collections import Counter
 
 # 🧠 GRAPH ENGINE - Network Intelligence
 try:
@@ -189,7 +190,7 @@ POOL_FILES = {
 # Hard-code seeds per version here — edit as needed.
 SEEDS_V0 = [
     "0x0a2978072FCe42eCeC6193431b1fbF65368Ed4a2"
-    "0x9C0d2305495676eda3F86BBB6f070a5578118Ce8"
+    "0x9C0d2305495676eda3F86BBB6f070a5578118Ce8 "
     "0x21E26f9d487C1dfACB23ae69E256b47E4d7D451b"
     "0xAaD38c88712e2e4B9F407D353f61AC76e2C8746B"
 ]
@@ -912,8 +913,6 @@ def compute_advanced_features(txs, token_filter=None):
         
         # Repeated recipients (washing pattern)
         repeat_receiver_ratio = len([c for c in Counter(receivers).values() if c > 3]) / unique_receivers if unique_receivers > 0 else 0
-        
-        from collections import Counter
         
         return {
             # Temporal
