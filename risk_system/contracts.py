@@ -15,7 +15,7 @@ TOKEN_CONTRACTS: dict[str, TokenMetadata] = {
     "USDC": {"address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", "decimals": 6},
     "BUSD": {"address": "0x4fabb145d64652a948d72533023f6e7a623c7c53", "decimals": 18},
     "DAI": {"address": "0x6b175474e89094c44da98b954eedeac495271d0f", "decimals": 18},
-    "USDP": {"address": "0x8e870d67f660d95d5be2d627f142b3d3c9145e9", "decimals": 18},
+    "USDP": {"address": "0x8e870d67f660d95d5be2d627f142b3d3c9145e9d", "decimals": 18},
     "TUSD": {"address": "0x0000000000085d4780b73119b8b580991dee8d52", "decimals": 18},
 }
 

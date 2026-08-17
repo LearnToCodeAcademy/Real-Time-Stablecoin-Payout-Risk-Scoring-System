@@ -2,6 +2,14 @@ from risk_system.contracts import TOKEN_CONTRACTS, TRANSFER_TOPIC
 from risk_system.live import AlertStore, LiveEventBroker
 
 
+def test_token_contract_addresses_are_valid_ethereum_addresses():
+    for metadata in TOKEN_CONTRACTS.values():
+        address = metadata["address"]
+        assert address.startswith("0x")
+        assert len(address) == 42
+        int(address[2:], 16)
+
+
 def _topic(address: str) -> str:
     return "0x" + "0" * 24 + address[2:]
 
