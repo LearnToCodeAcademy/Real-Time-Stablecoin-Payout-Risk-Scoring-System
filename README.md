@@ -1,182 +1,125 @@
-# Real-Time Stablecoin Payout Risk Scoring System
+# Stablecoin Payout Risk Intelligence
 
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-Risk_API-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![ML](https://img.shields.io/badge/ML-RF_/_XGBoost_/_LightGBM-00D4FF?style=for-the-badge)
-![Graph](https://img.shields.io/badge/Graph-Network_Intelligence-7C3AED?style=for-the-badge)
-![Decision](https://img.shields.io/badge/Decision-ALLOW_/_REVIEW_/_BLOCK-111827?style=for-the-badge)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-3.0-009688?style=flat-square&logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=06131a)
+![CI](https://img.shields.io/github/actions/workflow/status/qjmre23/Real-Time-Stablecoin-Payout-Risk-Scoring-System/ci.yml?style=flat-square&label=CI)
 
-Pre-transaction wallet intelligence for stablecoin and token payouts. The system combines Etherscan-derived transaction features, token-aware rules, machine-learning models, and wallet graph analysis into a real-time decision engine.
+Real-time, pre-payout wallet intelligence for Ethereum stablecoins. The system combines real Etherscan/provider events, behavioral rules, versioned machine learning, and transaction-graph context into **ALLOW / REVIEW / BLOCK** decisions.
 
-**Credit:** John Marwin Ebona
+**Created and maintained with credit to John Marwin Ebona.**
 
----
+![Security command center](docs/assets/console.png)
 
-## What It Does
-
-| Layer | Purpose |
-| --- | --- |
-| Dataset engine | Expands wallet pools and generates V0-V4 labeled CSV datasets from Etherscan transaction data. |
-| ML training | Trains per-token RandomForest, XGBoost, and LightGBM models for USDT, USDC, DAI, BUSD, USDP, and TUSD. |
-| Runtime scoring | Scores wallets with rule-based checks first, then ML inference when a trained model exists. |
-| Graph intelligence | Builds wallet transaction graphs with degree, PageRank, centrality, clusters, and malicious-neighbor signals. |
-| API layer | Serves wallet scoring, batch scoring, model info, and health checks through FastAPI. |
-| Web UI | Includes static `checker.html`, `training.html`, and `index.html` pages for local or static hosting. |
-| Live stream | Provides a WebSocket listener skeleton plus `/ws/live-alerts` for the checker UI. |
-
----
-
-## Visual Flow
+## System At A Glance
 
 ```mermaid
 flowchart LR
-    A["Etherscan API"] --> B["main.py<br/>wallet expansion + V0-V4 datasets"]
-    B --> C["datasets/*.csv"]
-    C --> D["train_ml.py<br/>RF / XGBoost / LightGBM"]
-    D --> E["models/*.pkl<br/>model + scaler + features"]
-    C --> F["db.py<br/>Postgres feature cache"]
-    E --> G["wallet_check.py<br/>rules + ML + graph signals"]
-    F --> G
-    H["graph_engine.py"] --> G
-    G --> I["api.py<br/>FastAPI REST service"]
-    G --> J["dashboard.py<br/>Streamlit console"]
-    K["stream_listener.py"] --> G
+    Chain["Ethereum / Etherscan V2"] --> Live["Real transfer listener"]
+    Chain --> Collect["Resumable wallet collector"]
+    Intel["Attributed threat intelligence"] --> Score["Reputation + rules + ML"]
+    Collect --> Data["Wallets + canonical features"]
+    Labels["Trusted labels only"] --> Train["Leakage-safe trainer"]
+    Data --> Train
+    Train --> Versions["Versioned models + rollback"]
+    Versions --> Score
+    Live --> Score
+    Score --> API["FastAPI + Redis/Postgres"]
+    API --> UI["React security console"]
 ```
 
-```mermaid
-flowchart TD
-    W["Wallet address"] --> T["Fetch transactions"]
-    T --> D["Detect token<br/>manual override -> tokenSymbol -> contractAddress"]
-    D --> R["Apply defensive rules"]
-    R -->|Rule fires| X["ALLOW / REVIEW / BLOCK"]
-    R -->|No rule fires| M["Load token model lazily"]
-    M --> P["Predict safe / malicious / poisoned"]
-    P --> X
-```
+| Capability | Shipped behavior |
+|---|---|
+| Collection | Select 1 to 1,000,000 wallets, six stablecoins, seeds, breadth, and history depth; every job checkpoints and resumes. |
+| Live alerts | Uses provider WebSockets or real Etherscan transfer logs. No synthetic alert fallback is emitted. |
+| Threat intelligence | Screens attributed local feeds, optional Etherscan metadata/public warnings, and optional Chainabuse before behavioral ML. |
+| Training | Wallet-deduplicated 70/15/15 splits, train-only preprocessing, 5-fold CV, RF/XGBoost/LightGBM comparison, optional 0-200 Optuna trials. |
+| Versions | Every successful run creates immutable artifacts, metrics, an active pointer, and one-click rollback. |
+| Operations | Wallet investigation, live stream, network graph, cases, model analytics, collection/training jobs, and settings. |
+| Backend | API-key hashing, configurable rate limiting/CORS, Redis TTL cache, Postgres feature storage, SQLite alert/case store, JSON logs, Prometheus metrics. |
 
----
+## Run Locally
 
-## Token Coverage
-
-| Group | Status | Tokens |
-| --- | --- | --- |
-| Trained stablecoins | Full ML scoring | USDT, USDC, DAI, BUSD, USDP, TUSD |
-| Watch-only tokens | Detection and rule fallback | FRAX, USDX, GUSD, LUSD, MIM, USDD, EURS, DOLA, GOHM, USDCE, ALUSD, cUSDT, AAVE, COMP, SNX, UNI, LINK, SUSHI, CRV, 1INCH, YFI, MKR, BAL, AURA, WETH, MATIC, LDO, ARB, OP, GMX, SOL, MANTLE, LINEA, WBTC, cBTC, stETH, rswETH, CBETH, LST, cbRES, swETH, DOGE, SHIB, PEPE, FLOKI, BONK, WLD, SAFE, ETH |
-
----
-
-## Repository Map
-
-| Path | Role |
-| --- | --- |
-| `main.py` | Dataset generation, wallet expansion, feature extraction, V0-V4 pipelines. |
-| `train_ml.py` | Multi-model training, token-specific weights, model/scaler export. |
-| `wallet_check.py` | Runtime wallet scoring, token detection, rules, lazy model loading. |
-| `api.py` | FastAPI service for scoring and system metadata. |
-| `dashboard.py` | Streamlit dashboard for wallet scoring, charts, and system views. |
-| `graph_engine.py` | NetworkX graph metrics and suspicious-cluster analysis. |
-| `gnn_model.py` | Optional PyTorch Geometric GNN experiments. |
-| `deep_model.py` | Optional TensorFlow/PyTorch sequence-model experiments. |
-| `stream_listener.py` | Alchemy/Infura WebSocket listener and alert callback shell. |
-| `db.py` | Postgres-backed feature and label cache. |
-| `scan_and_report.py` | Quick dataset/model inventory helper. |
-| `model_tester.py` | Simple model-load sanity script. |
-| `technical.txt` | Full ecosystem explanation, file-by-file connections, and current caveats. |
-| `index.html` | Static local project overview for browser preview. |
-| `checker.html` | Static wallet checker that can call a local or deployed FastAPI backend. |
-| `training.html` | Local-only training console for API-triggered training runs and rollbacks. |
-
----
-
-## Quick Start
-
-```bash
+```powershell
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt
+cd frontend
+npm install
+cd ..
+Copy-Item .env.example .env
+python scripts\start_local.py
 ```
 
-Create `.env` from your own local values:
+Add at least one real source to your untracked `.env`:
 
 ```env
-ETHERSCAN_API_KEY=your_etherscan_api_key_here
-DATABASE_URL=your_postgres_connection_string_here
-ALCHEMY_WS_URL=wss://your-provider-websocket-url-here
+ETHERSCAN_API_KEY=your_key
+# or ALCHEMY_WS_URL / INFURA_WS_URL / ETH_RPC_WS_URL
 ```
 
-Run the API:
+- Checker and command center: **http://127.0.0.1:5173/**
+- Local collection and training: **http://127.0.0.1:5173/training.html**
+- API explorer: **http://127.0.0.1:8000/docs**
+- Metrics: **http://127.0.0.1:8000/metrics**
 
-```bash
-python api.py
+The live screen shows `offline` when no provider/key is configured. It never fills the table with demo incidents.
+
+## Safety Behavior
+
+An explicit provider reputation match blocks before behavioral scoring. If chain history cannot be fetched, or no usable evidence exists, the result is **REVIEW / UNSCORABLE** and probabilities display as `not calculated`; missing data is never presented as `Normal 0%`.
+
+The training page can sync Etherscan's current Gas Guzzlers table, but imports only rows carrying an explicit phishing/scam label. High gas usage alone is not treated as malicious. For licensed feeds and provider options, see [threat_intel/README.md](threat_intel/README.md).
+
+## Large Collection And Training
+
+The GUI defaults to 50,000 wallets and accepts up to 1,000,000. The same workflows are scriptable:
+
+```powershell
+python scripts\collect_wallets.py --target 50000 --tokens USDT USDC
+python scripts\train_models.py --token usdt --model auto --tuning-trials 50
+python scripts\evaluate_model.py --token usdt
 ```
 
-Open:
+Collected neighbors are stored with label `-1`. They can enrich a dataset, but supervised training uses only independently trusted labels `0/1/2`; network proximity is not silently converted into a fraud label.
 
-- API docs: `http://localhost:8000/docs`
-- Health check: `http://localhost:8000/health`
-- Static overview/checker/training: run `python -m http.server 8080`, then open `http://localhost:8080/`
+## Honest Model Results
 
-Score a wallet from Python:
+Latest local 50-trial runs on the repository's historical labeled data:
 
-```python
-from wallet_check import score_wallet
+| Token | Test accuracy | Macro F1 | Malicious recall | Poisoned recall | Target |
+|---|---:|---:|---:|---:|---|
+| USDT | 95.17% | 85.31% | 41.67% | 100.00% | Not met |
+| USDC | 93.94% | 86.73% | 63.64% | 100.00% | Not met |
 
-result = score_wallet("0x0000000000000000000000000000000000000000", manual_token="USDT")
-print(result)
+Accuracy is high because safe wallets dominate. Neither model meets the project's stricter requirement of 0.90 macro F1 plus 0.90 recall for both fraud classes, so these models support investigation and review rather than unattended blocking. See the generated [USDT report](docs/model_performance/usdt_report.md) and [USDC report](docs/model_performance/usdc_report.md).
+
+DAI, BUSD, USDP, and TUSD remain training-blocked when their trusted data lacks a class or has fewer than ten examples in the smallest class. The trainer reports that limitation instead of manufacturing a score.
+
+## Deployment
+
+```powershell
+docker compose up --build
 ```
 
----
+This starts FastAPI, PostgreSQL, and Redis. The React package can be deployed from `frontend/` to Netlify. Netlify serves the read-only console; collection and training stay locked there and require the local API with `ENABLE_LOCAL_TRAINING=true`. Set `VITE_API_BASE_URL` to a separately hosted FastAPI URL when building a connected static console.
 
-## Decision Logic
+## Documentation
 
-| Output | Meaning |
-| --- | --- |
-| `ALLOW` | No rule/model signal crossed the risk threshold. |
-| `REVIEW` | Suspicious behavior exists, but the wallet needs human review before blocking. |
-| `BLOCK` | High-confidence malicious or poisoned behavior was detected. |
+- [Architecture](docs/ARCHITECTURE.md)
+- [Feature reference](docs/FEATURES.md)
+- [Deep-model boundary](docs/DEEP_MODELS.md)
+- [Full ecosystem and every file](technical.txt)
+- [Implementation log](IMPLEMENTATION_LOG.md)
+- [Security audit](AUDIT.md)
+- [Original engineering build specification](docs/AGENT_BUILD_PROMPT.md)
 
-Current runtime flow:
+## Security
 
-1. Fetch Etherscan transactions for a wallet.
-2. Detect token by manual override, token symbol, or known contract address.
-3. Generate behavioral and graph-aware features.
-4. Run defensive rules for obvious risky patterns.
-5. If no rule decides, load the token model on demand.
-6. Return probabilities, confidence, graph fields, reason, and final decision.
+Secrets belong only in `.env`; `.env.example` contains placeholders. Consumer API keys are stored as SHA-256 hashes through `API_KEYS_SHA256`. CI and pre-commit run `detect-secrets`.
 
----
+Earlier commits exposed credentials. Current code no longer contains them, but provider-side credential rotation and a coordinated Git history rewrite are still required before treating the repository history as clean. See [AUDIT.md](AUDIT.md).
 
-## Important Current Notes
+## License And Credit
 
-- Active Etherscan key configuration now reads from environment variables. Previously exposed keys still need rotation and Git history scrubbing.
-- Some historical data/model artifacts are committed even though `.gitignore` excludes generated CSV and pickle files.
-- `train_ml.py` now splits before fitting scalers and oversampling; performance claims still need fresh generated reports.
-- `gnn_model.py` is optional and imports safely without PyTorch, but GNN training still requires PyTorch and PyTorch Geometric.
-- Local training is disabled unless the API runs with `ENABLE_LOCAL_TRAINING=true`.
-
-See `technical.txt` for the detailed system ecosystem, exact file relationships, and remediation notes.
-
----
-
-## Local Preview
-
-This repo includes a lightweight static preview:
-
-```bash
-python -m http.server 8080
-```
-
-Then visit `http://localhost:8080/`.
-
-Static pages:
-
-- Checker: `http://localhost:8080/checker.html`
-- Local training: `http://localhost:8080/training.html`
-
----
-
-## Credits
-
-Built and credited to **John Marwin Ebona**.
-
-Visual README elements use standard GitHub Markdown diagrams and Shields-style badge images.
+No license file is currently included, so normal copyright restrictions apply. Project credit: **John Marwin Ebona**.

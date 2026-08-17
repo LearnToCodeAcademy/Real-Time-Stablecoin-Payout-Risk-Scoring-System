@@ -1,2 +1,0 @@
-wallet,token,wallet_age_days,avg_tx,recent_tx,tx_frequency,tx_per_min,tx_per_hour,tx_per_day,avg_time_between_tx_sec,is_high_freq,is_low_value,is_new_wallet,risk_score_rule,dust_tx_ratio,similarity_hits,new_sender_ratio,is_poisoned_pattern,label
-0xa12431d0b9db640034b0cdfceef9cce161e62be4,usdp,220,9.93114822164339,9.594296248328927,0.0136363636363636,9.447003882718595e-06,0.0005668202329631,0.0136036855911147,6351220.0,False,False,False,0.0,0,0,0,0,0

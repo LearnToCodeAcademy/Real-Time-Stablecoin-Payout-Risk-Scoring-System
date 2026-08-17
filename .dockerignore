@@ -1,0 +1,11 @@
+.git
+.venv
+frontend/node_modules
+frontend/dist
+__pycache__
+*.pyc
+.env
+backup models
+datasets deprecated
+model_versions
+data

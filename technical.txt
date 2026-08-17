@@ -1,918 +1,673 @@
 REAL-TIME STABLECOIN PAYOUT RISK SCORING SYSTEM
-TECHNICAL ECOSYSTEM MAP
+COMPLETE TECHNICAL ECOSYSTEM REFERENCE
 
 Credit: John Marwin Ebona
+System version: 3.0.0
+Reference date: 2026-08-17
 
-This file explains how the repository fits together as an ecosystem. It is
-intentionally long and explicit. The README is the compact front door; this
-file is the engineering map.
-
-===============================================================================
-1. SYSTEM PURPOSE
-===============================================================================
-
-The system is a Python-based wallet risk intelligence engine for stablecoin and
-token payouts. Its goal is to evaluate a wallet before or during payout and
-return a practical operational decision:
-
-- ALLOW: payout can continue.
-- REVIEW: suspicious signal exists and a human should review.
-- BLOCK: high-risk malicious or poisoned wallet behavior was detected.
-
-The system does this by combining:
-
-- Etherscan transaction collection.
-- Dataset generation across multiple data versions.
-- Token-aware feature engineering.
-- RandomForest / XGBoost / LightGBM model training.
-- Runtime rules for obvious high-risk behavior.
-- Lazy model loading at inference time.
-- Graph intelligence from wallet-to-wallet transaction networks.
-- FastAPI service endpoints.
-- Streamlit dashboard views.
-- WebSocket listener scaffolding for live token-transfer monitoring.
+This document is the long-form engineering map for the repository. README.md
+is the compact operator entry point. This file explains the data lifecycle,
+runtime boundaries, security controls, persistence, model integrity, every
+tracked source/configuration file, generated artifacts, and how the pieces
+connect.
 
 ===============================================================================
-2. HIGH-LEVEL DATA FLOW
+1. PURPOSE AND TRUST MODEL
 ===============================================================================
 
-The current source-level flow is:
+The system evaluates Ethereum wallets before or during stablecoin payouts. A
+request ultimately produces one of three operational decisions:
 
-1. main.py talks to Etherscan and wallet seed/pool files.
-2. main.py expands wallets and writes versioned CSV datasets.
-3. train_ml.py reads those CSV datasets and trains token-specific models.
-4. train_ml.py exports models, scalers, and feature lists as pickle files.
-5. wallet_check.py fetches wallet transactions at runtime.
-6. wallet_check.py detects the token and generates scoring features.
-7. wallet_check.py applies defensive rules before ML.
-8. wallet_check.py lazily loads the right token model when needed.
-9. wallet_check.py returns ALLOW, REVIEW, or BLOCK.
-10. api.py exposes this through HTTP endpoints.
-11. dashboard.py offers an operator-facing Streamlit surface.
-12. stream_listener.py can listen to provider WebSockets and pass events into
-    scoring handlers.
-13. graph_engine.py can enrich either dataset generation or runtime scoring
-    with network metrics.
-14. db.py optionally caches features and labels in Postgres.
+ALLOW  - usable evidence exists and no configured risk threshold is crossed.
+REVIEW - evidence is incomplete, suspicious, or unsupported by a usable model.
+BLOCK  - a high-confidence rule/model signal crosses a blocking threshold.
 
-ASCII architecture:
+The trust model is conservative. Etherscan or a JSON-RPC provider is the source
+of chain facts. The backend is the source of scoring truth. The browser does
+not contain a second risk engine and never calls Etherscan directly. New graph
+neighbors are facts about connectivity, not verified fraud labels. Missing
+provider credentials produce an offline live state, not sample alerts. Missing
+models and low-data wallets produce REVIEW, not an invented safe answer.
 
-    Etherscan API
-        |
-        v
-    main.py ----------------------.
-        |                         |
-        v                         v
-    datasets/*.csv             graph_engine.py
-        |                         |
-        v                         |
-    train_ml.py                   |
-        |                         |
-        v                         |
-    models/*.pkl                  |
-        |                         |
-        v                         |
-    wallet_check.py <-------------'
-        |
-        +--> api.py
-        +--> dashboard.py
-        +--> stream_listener.py callback path
+There are four major pipelines:
+
+1. COLLECTION: real token-transfer history expands a wallet graph and writes
+   resumable data/checkpoints.
+2. TRAINING: trusted labeled wallets are deduplicated, split, cross-validated,
+   tuned, evaluated once on a held-out test set, versioned, and activated.
+3. SCORING: attributed reputation is checked first; when it does not match,
+   transaction history becomes behavioral features for rules and active models.
+4. LIVE OPERATIONS: confirmed Transfer logs become persisted events, selected
+   recipient wallets are scored, cases are opened, and browser clients receive
+   the event through FastAPI WebSockets.
 
 ===============================================================================
-3. TOKEN MODEL
+2. END-TO-END CONNECTION MAP
 ===============================================================================
 
-The codebase uses a two-tier token model.
+Ethereum / Etherscan V2
+    |
+    +--> risk_system/reputation.py --> reputation gate --> wallet_check.py
+    |       ^
+    |       +-- threat_intel/*.csv / data/threat_intel/*.csv
+    |       +-- Etherscan Metadata or explicit public address warning
+    |       `-- Chainabuse checked reports
+    |
+    +--> risk_system/etherscan.py
+    |       |
+    |       +--> risk_system/collector.py
+    |       |       +--> data/collections/<job-id>/wallets.csv
+    |       |       +--> data/collections/<job-id>/features.csv
+    |       |       +--> data/collections/<job-id>/processed.txt
+    |       |       `--> data/collections/<job-id>/checkpoint.json
+    |       |
+    |       +--> wallet_check.py --> rules + active model --> decision
+    |       |
+    |       `--> risk_system/live.py --> SQLite event/case store
+    |
+Trusted historical CSV labels
+    `--> risk_system/training.py
+            +--> docs/model_performance/<token>_report.md
+            +--> model_versions/<version>/{model,scaler,features,metrics}
+            `--> models/<token>_{model,scaler,features}.pkl
 
-Trained tokens:
+models/ + wallet_check.py + db.py
+    `--> api.py
+            +--> REST and WebSocket endpoints
+            +--> Redis response cache
+            +--> PostgreSQL durable feature cache
+            +--> SQLite alerts and cases
+            `--> frontend/src/api.ts --> frontend/src/App.tsx
 
-- USDT
-- USDC
-- BUSD
-- DAI
-- USDP
-- TUSD
-
-These are the tokens expected to have full ML scoring artifacts:
-
-- models/<token>_model.pkl
-- models/<token>_scaler.pkl
-- models/<token>_features.pkl
-
-Watch-only tokens:
-
-- FRAX, USDX, GUSD, LUSD, MIM, USDD, EURS, DOLA, GOHM, USDCE, ALUSD, cUSDT
-- AAVE, COMP, SNX, UNI, LINK, SUSHI, CRV, 1INCH, YFI, MKR, BAL, AURA
-- WETH, MATIC, LDO, ARB, OP, GMX, SOL, MANTLE, LINEA
-- WBTC, cBTC, stETH, rswETH, CBETH, LST, cbRES, swETH
-- DOGE, SHIB, PEPE, FLOKI, BONK, WLD, SAFE
-- ETH
-
-Watch-only tokens are recognized for detection/reporting and rule fallback, but
-they do not have dedicated trained models in the current repository.
-
-Token type categories:
-
-- stablecoin
-- defi
-- native
-- wrapped
-- meme
-
-wallet_check.py and main.py both carry token classification maps. These maps
-let the system apply different thresholds and assumptions for different token
-classes.
+The active production path is FastAPI plus the React console. dashboard.py is
+retained only as a legacy/internal Streamlit surface. train_ml.py and main.py
+are retained for historical V0-V4 workflows; new jobs are implemented in the
+risk_system package and scripts directory.
 
 ===============================================================================
-4. DATASET VERSIONING
+3. CHAIN INTEGRATION
 ===============================================================================
 
-main.py defines a V0-V4 dataset lifecycle:
+risk_system/etherscan.py implements the synchronous Etherscan V2 client. The
+base endpoint is https://api.etherscan.io/v2/api and chainid defaults to 1.
+Keys come only from ETHERSCAN_API_KEY or ETHERSCAN_API_KEY_V0 through V4.
+configured_api_keys() removes blanks and duplicates without logging values.
 
-V0 - broad baseline safe candidates
-    Intended to represent normal-looking wallets and broad background behavior.
+The client rotates keys, paces each key independently, handles HTTP 429 and
+Etherscan rate-limit messages, honors Retry-After when present, and otherwise
+uses exponential backoff plus jitter. The implemented API operations are:
 
-V1 - high-trust malicious
-    Seed-driven malicious or suspicious wallet expansion.
+- account/tokentx for wallet ERC-20 transfer histories and graph expansion.
+- proxy/eth_blockNumber for the latest Ethereum block.
+- logs/getLogs for ERC-20 Transfer logs over a selected block range.
 
-V2 - scaled malicious
-    Larger malicious expansion from configured seeds or pools.
+risk_system/contracts.py is the single active metadata source for USDT, USDC,
+BUSD, DAI, USDP, and TUSD contract addresses/decimals. It also defines the
+canonical Transfer event topic and reverse contract-to-symbol map. Collection
+and live parsing both import this module, preventing contract drift.
 
-V3 - poisoning behavior
-    Focuses on address poisoning and suspicious behavioral signatures.
+Provider WebSocket precedence is ALCHEMY_WS_URL, then INFURA_WS_URL, then
+ETH_RPC_WS_URL. When configured, risk_system/live.py sends eth_subscribe for
+the Transfer topic on each supported stablecoin contract. If no WebSocket is
+configured but Etherscan keys exist, the broker polls confirmed block logs.
+If neither exists, state is offline. There is deliberately no random or demo
+event branch.
 
-V4 - high-confidence safe
-    Filters safe candidates more strictly.
-
-The training pipeline then reads CSV files such as:
-
-- datasets/v0_<token>.csv
-- datasets/v1_<token>.csv
-- datasets/v2_<token>.csv
-- datasets/v3_<token>.csv
-- datasets/<token>_labeled_v4.csv
-- datasets/<token>_training_ready.csv
-
-The current clone does not include an active datasets/ folder in the file list,
-but it does include historical CSVs under "datasets deprecated/" and several
-small backup CSVs under backups/.
-
-===============================================================================
-5. RUNTIME DECISION FLOW
-===============================================================================
-
-wallet_check.py is the center of runtime inference.
-
-Main runtime steps:
-
-1. fetch_transactions(address, debug=False)
-   Calls Etherscan for a wallet address and returns transaction data.
-
-2. detect_token(transactions, manual_token=None, debug=False)
-   Uses a three-level strategy:
-   - manual token override when provided;
-   - tokenSymbol from transaction data;
-   - contractAddress mapped against known token contracts.
-
-3. generate_features(transactions, wallet_address=None)
-   Converts raw transactions into model/rule features.
-
-4. apply_rule_based_filters(...)
-   Applies defensive heuristics before ML. If a rule confidently decides, it
-   can return ALLOW, REVIEW, or BLOCK without model inference.
-
-5. load_model_for_token(token)
-   Loads a token model only when that token is being scored. This avoids loading
-   all model files during import/startup.
-
-6. score_wallet(address, manual_token=None, debug=False)
-   Orchestrates the full scoring lifecycle and returns a dictionary-like result.
-
-Output fields used by api.py include:
-
-- wallet
-- token
-- score
-- decision
-- reason
-- prob_normal
-- prob_malicious
-- prob_poisoned
-- confidence
-- graph_degree
-- graph_pagerank
-- connected_to_malicious
-- features_extracted
-- timestamp
-- processing_time_ms
+Every accepted live row is tied to a chain record through transactionHash,
+logIndex, blockNumber, sender, recipient, contract/token, and amount. The
+normalized payload marks verified_real=true. A status heartbeat may be sent
+once per second over the browser WebSocket, but heartbeats are not alerts.
 
 ===============================================================================
-6. FILE-BY-FILE ECOSYSTEM
+4. WALLET COLLECTION AT 50,000+ SCALE
 ===============================================================================
 
-README.md
-    Compact public-facing project overview. It now describes the current Python
-    ecosystem instead of keeping the older duplicated long-form README content.
-    It links to technical.txt for deeper explanation.
-
-technical.txt
-    This file. Long-form source map, lifecycle explanation, and caveat register.
-
-index.html
-    Lightweight static localhost overview. It is not the production scoring UI.
-    It is a browser-friendly project landing page that can be served with:
-        python -m http.server 8080
-
-checker.html
-    Static wallet checker UI. It can run from localhost or a static host such as
-    Netlify when pointed at a reachable FastAPI backend. It does not call
-    Etherscan directly; it posts wallet lookups to /score_wallet and listens to
-    /ws/live-alerts for live feed events.
-
-training.html
-    Standalone/local training console. It calls the FastAPI /training endpoints
-    and is intentionally useless on static hosting unless a local backend has
-    ENABLE_LOCAL_TRAINING=true. It can start a training run, show history, and
-    request rollback to a pre-run model snapshot.
-
-.gitignore
-    Ignores Python cache files, virtualenvs, generated CSVs, pickle models,
-    IDE files, OS files, and .env files. Important caveat: some CSV and pickle
-    artifacts are already tracked in the repository despite these ignore rules.
-
-.env
-    Currently present in the clone. This should never be committed in a secure
-    production repository. It is mentioned here because the source currently
-    contains it, not because it should remain tracked.
-
-requirements.txt
-    Minimal dependency list:
-    - pandas
-    - numpy
-    - requests
-    - beautifulsoup4
-    - scikit-learn
-    - psycopg2-binary
-    - python-dotenv
-    - xgboost
-    - lightgbm
-
-    Missing for all optional/current modules:
-    - fastapi and uvicorn for api.py
-    - pydantic for API request/response models
-    - streamlit and plotly for dashboard.py
-    - networkx for graph_engine.py/dashboard graph work
-    - websockets and aiohttp for stream_listener.py
-    - tensorflow/torch/torch-geometric for optional deep/GNN modules
-    - shap for optional explainability in wallet_check.py
-
-main.py
-    Core dataset-generation engine. It owns:
-    - Etherscan configuration.
-    - API key selection by version.
-    - command-line parsing for --version and --mode.
-    - token lists and token type classification.
-    - wallet seed lists.
-    - pool-file paths for public address dataset/.
-    - V0-V4 enable flags and config.
-    - transaction fetching.
-    - wallet expansion.
-    - base, graph, and advanced feature computation.
-    - fraud keyword analysis.
-    - transaction pattern analysis.
-    - V0/V1/V2/V3/V4 dataset functions.
-    - dual/expand/extract pipeline execution modes.
-
-    Key functions:
-    - get_api_key
-    - parse_args
-    - load_pool
-    - get_unique_path
-    - save_pool
-    - get_config_for_version
-    - get_use_pool_for_version
-    - run_version_pipeline
-    - run_parallel_versions
-    - fetch_txs
-    - expand_wallets
-    - compute_base_features
-    - compute_graph_features
-    - compute_advanced_features
-    - analyze_text_for_fraud
-    - check_wallet_keywords
-    - analyze_transaction_patterns
-    - calculate_fraud_score
-    - compute_v3_features
-    - is_v0_safe_candidate
-    - is_v4_high_confidence_candidate
-    - run_v0, run_v1, run_v2, run_v3, run_v4
-    - extract_features_for_version
-    - generate_v4_dataset
-    - generate_v0_training_ready
-
-    Connections:
-    - Reads/writes public address dataset/ wallet pools.
-    - Writes datasets/ CSVs when generation runs.
-    - Imports graph_engine.TransactionGraph when available.
-    - Produces input data for train_ml.py.
-
-train_ml.py
-    Training pipeline for token-specific models.
-
-    Key responsibilities:
-    - Load token datasets.
-    - Normalize selected transaction-value fields.
-    - Define ALL_FEATURES expected by models.
-    - Apply token-specific class weights and threat profiles.
-    - Train RandomForest, XGBoost, and LightGBM candidates.
-    - Pick the best model by validation F1.
-    - Save the winning model, scaler, and feature column list.
-
-    Key functions:
-    - load_dataset
-    - load_dataset_with_info
-    - train_token_model
-
-    Connections:
-    - Reads datasets/*.csv.
-    - Writes models/*.pkl.
-    - Its exported scaler/features are consumed by wallet_check.py.
-
-    Current technical caveat:
-    - The file currently uses StandardScaler.fit_transform before splitting.
-    - It also performs resampling before validation splitting.
-    - This can leak validation information into training and inflate metrics.
-
-wallet_check.py
-    Runtime scoring engine. It is the most important operational file.
-
-    Key responsibilities:
-    - Fetch wallet transactions.
-    - Detect supported token.
-    - Generate runtime features.
-    - Check DB cache through db.py.
-    - Apply token-specific thresholds and rules.
-    - Load ML model/scaler/features lazily from models/.
-    - Return final ALLOW/REVIEW/BLOCK decision.
-
-    Key functions:
-    - load_model_for_token
-    - apply_rule_based_filters
-    - fetch_transactions
-    - detect_token
-    - generate_features
-    - score_wallet
-
-    Connections:
-    - Imports get_features and save_features from db.py.
-    - Optionally imports TransactionGraph from graph_engine.py.
-    - Reads model artifacts from models/.
-    - Called by api.py.
-    - Intended to be callable by stream_listener.py handlers.
-
-api.py
-    FastAPI service layer.
-
-    Declared endpoints:
-    - GET /health
-    - GET /model_info
-    - POST /score_wallet
-    - POST /batch_score
-    - GET /training/history
-    - POST /training/train
-    - GET /training/status/{run_id}
-    - POST /training/rollback/{run_id}
-    - WebSocket /ws/live-alerts
-
-    Data models:
-    - WalletScoringRequest
-    - WalletScoringResponse
-    - BatchScoringRequest
-    - BatchScoringResponse
-    - HealthResponse
-    - ModelInfoResponse
-
-    Connections:
-    - Imports score_wallet, fetch_transactions, detect_token, and
-      generate_features from wallet_check.py.
-    - Imports graph classes in health checks.
-    - Runs local training through train_ml.py only when ENABLE_LOCAL_TRAINING is
-      explicitly enabled.
-    - Can be run directly with python api.py.
-    - Exposes Swagger docs at /docs when uvicorn/FastAPI dependencies exist.
-
-dashboard.py
-    Streamlit dashboard.
-
-    Current views:
-    - Overview
-    - Wallet Scorer
-    - Analytics
-    - Network Graph
-    - System Status
-
-    Connections:
-    - Intended operator UI for scoring and visualization.
-    - Uses pandas, numpy, plotly, streamlit, and optional networkx.
-    - Some displayed metrics are generated/demo values, so treat it as an
-      operational visualization shell rather than verified live production
-      telemetry.
-
-db.py
-    Postgres feature/label cache.
-
-    Key functions:
-    - get_features(wallet, token)
-    - save_features(wallet, token, f)
-    - get_label(wallet)
-    - save_label(wallet, label, trusted)
-
-    Connections:
-    - Loads .env through python-dotenv.
-    - Reads DATABASE_URL.
-    - Used by wallet_check.py to avoid recomputing features.
-
-    Current caveat:
-    - The file has unusual CR/LF artifacts in the raw output. Normalizing line
-      endings would make future reviews and patches cleaner.
-
-graph_engine.py
-    Network intelligence module built on NetworkX.
-
-    Main class:
-    - TransactionGraph
-
-    Key methods:
-    - add_transaction
-    - build_from_transactions
-    - add_known_malicious
-    - get_node_degree
-    - get_pagerank
-    - get_clustering_coefficient
-    - get_betweenness_centrality
-    - get_closeness_centrality
-    - get_unique_counterparties
-    - get_connected_components
-    - get_strongly_connected_components
-    - detect_suspicious_clusters
-    - find_paths_to_malicious
-    - get_total_inflow
-    - get_total_outflow
-    - get_transaction_flow_ratio
-    - extract_features
-    - get_statistics
-
-    Top-level helper:
-    - create_graph_from_wallet_transactions
-
-    Connections:
-    - Imported by main.py for graph features.
-    - Imported by wallet_check.py for runtime graph enrichment.
-    - Imported by api.py health check.
-
-gnn_model.py
-    Optional graph neural network experiment module.
-
-    Main classes:
-    - GCNFraudDetector
-    - GATFraudDetector
-    - GraphSAGEFraudDetector
-    - WalletNetworkGNN
-    - EnsembleGNNs
-
-    Connections:
-    - Conceptually extends graph_engine.py with trainable neural graph models.
-    - Depends on torch and torch-geometric.
-
-    Current caveat:
-    - The module conditionally imports torch/nn but defines classes inheriting
-      from nn.Module at module scope. On an environment without torch, importing
-      this file can fail before graceful fallback logic can help.
-
-deep_model.py
-    Optional sequence-model experiment module.
-
-    Main classes:
-    - LSTMFraudDetector
-    - TransformerFraudDetector
-    - EnsembleDeepModels
-
-    Top-level helper:
-    - create_feature_sequences
-
-    Connections:
-    - Uses TensorFlow/Keras when available.
-    - Optionally imports torch.
-    - Intended to model temporal transaction behavior beyond tabular features.
-
-stream_listener.py
-    Real-time WebSocket monitoring module.
-
-    Main classes:
-    - StreamListener
-    - StreamEventHandler
-
-    Key methods:
-    - listen
-    - _subscribe_to_token
-    - _process_message
-    - _parse_log
-    - _score_and_handle
-    - _score_transaction
-    - stop
-    - get_stats
-    - print_stats
-
-    Top-level function:
-    - run_stream_listener
-
-    Connections:
-    - Designed for Alchemy/Infura WebSocket URLs.
-    - Watches ERC-20 Transfer logs for core token contracts.
-    - Has callback hooks that can route scored transactions into alerting.
-
-    Current caveat:
-    - _score_transaction is a placeholder simulation rather than a full direct
-      call into wallet_check.py.
-    - Default provider URL contains YOUR-API-KEY placeholder.
-
-scan_and_report.py
-    Small inventory utility for scanning dataset/model availability.
-
-model_tester.py
-    Basic sanity script for checking model loading and simple behavior.
-
-test_contract_skip.py
-    Test file focused on skipping known token contract addresses.
-
-test_decision_fix.py
-    Test file focused on final decision behavior and threshold fixes.
-
-test_feature_fix.py
-    Test file focused on generated feature correctness.
-
-test_rules.py
-    Test file focused on rule-based filtering.
-
-test_token_detect.py
-    Test file focused on token detection behavior.
-
-test_token_expansion.py
-    Test file focused on expanded token coverage.
-
-test_token_integration.py
-    Test file focused on token integration across modules.
-
-test_wallet_check_fix.py
-    Test file focused on wallet_check.py fixes.
-
-CRITICAL_FIX_SUMMARY.md
-    Historical fix summary for the token detection flaw.
-    Useful details:
-    - Problem: tokenSymbol could be empty or unreliable.
-    - Fix: multi-level detection using manual override, tokenSymbol, and
-      contractAddress.
-    - Includes usage examples and troubleshooting.
-
-TOKEN_DETECTION_FIX.md
-    Detailed explanation of the same token detection issue and fix. This file
-    is more diagnostic and includes before/after architecture notes.
-
-WALLET_CHECK_USAGE_GUIDE.md
-    Usage guide for wallet_check.py. Includes CLI examples, programmatic use,
-    debug workflows, supported tokens, and troubleshooting.
-
-TOKEN_EXPANSION_README.md
-    Historical implementation note for expanding token support to the current
-    trained/watch-only model.
-
-TOKEN_SPECIFIC_RULES.md
-    Explains token-specific training configuration, scoring rules, and why
-    different assets need different thresholds.
-
-MULTI_TOKEN_IMPLEMENTATION.md
-    Historical implementation summary of multi-token dataset generation and
-    wallet_check.py lazy model loading.
-
-MULTI_TOKEN_SETUP_COMPLETE.md
-    Completion report for multi-token support. Summarizes confirmed/fixed
-    pieces, architecture, verification checklist, and next steps.
-
-pipeline.txt
-    Short root-level pipeline note. It overlaps with README/technical content
-    and should eventually be moved into docs/ or removed after consolidation.
-
-structure.txt
-    Short root-level structure note.
-
-structure copy.txt
-    Duplicate or near-duplicate of structure.txt.
-
-v4_wallet_pool.csv
-    Root-level CSV wallet pool for V4 high-confidence safe collection.
-
-wallet_pool.csv
-    Root-level CSV wallet pool used by expansion/generation workflows.
+risk_system/collector.py provides CollectionSettings, CollectionState, and
+WalletCollector. target_wallets accepts 1 through 1,000,000. Operators choose
+tokens, seeds, maximum neighbors per processed wallet, sampled transfers per
+wallet, and resume behavior. The React training console defaults to 50,000.
+
+The collector performs breadth-first expansion:
+
+1. Load explicit seeds; if blank, load valid addresses from wallet_pool.csv
+   and v4_wallet_pool.csv when those local ignored files exist.
+2. Recover previously discovered and processed wallets for the same job id.
+3. Fetch token transfers for each frontier wallet and token.
+4. Write one canonical feature record for the processed wallet/token.
+5. Extract unique valid from/to neighbors, append up to the configured bound,
+   and continue until the target, frontier exhaustion, cancellation, or error.
+6. Atomically rewrite checkpoint.json after each processed wallet.
+
+wallets.csv records wallet, source wallet, token, graph depth, collection time,
+and label=-1. features.csv records wallet/token/source plus the canonical 19
+features. processed.txt is an append-only restart marker. checkpoint.json is
+the human/API status record. API job state is separately mirrored under
+data/jobs/ so the UI can reconnect after a page refresh.
+
+This design supports very large selectable targets, but completion time depends
+on graph density, selected tokens, key count/tier, retries, and Etherscan quota.
+It does not claim that 50,000 wallets can be collected instantly. Cancellation
+preserves every completed row and checkpoint.
+
+Most importantly, discovered neighbors remain label -1. They are valid input
+for unsupervised analysis, graph review, and later trusted labeling, but the
+supervised trainer excludes them. Treating all neighbors of a bad wallet as
+malicious would contaminate the dataset and create deceptive metrics.
 
 ===============================================================================
-7. FOLDERS AND GENERATED ARTIFACTS
+5. FEATURE SCHEMA
 ===============================================================================
 
-backup models/
-    Contains older pickle artifacts:
-    - usdc_features.pkl
-    - usdc_model.pkl
-    - usdc_scaler.pkl
-    - usdt_features.pkl
-    - usdt_model.pkl
-    - usdt_scaler.pkl
+risk_system/features.py owns FEATURE_COLUMNS and features_from_transfers().
+The 19 active model features are:
 
-    These files are large generated model artifacts and are already tracked.
-    Future cleanup should move generated models out of Git or use release
-    artifacts/object storage.
+wallet_age_days, avg_tx, recent_tx, tx_frequency, tx_per_min, tx_per_hour,
+tx_per_day, avg_time_between_tx_sec, dust_tx_ratio, similarity_hits,
+new_sender_ratio, is_poisoned_pattern, tiny_tx_count, unique_receivers,
+avg_tx_value, window_days, repeat_small_to_count, no_meaningful_flow, and
+short_time_window.
 
-backups/
-    Contains small CSV snapshots:
-    - eth_datasets.csv_1.csv
-    - usdc_datasets.csv_1.csv
-    - usdt_datasets.csv_1.csv
-    - usdt_datasets.csv_2.csv
+Values are parsed defensively from real ERC-20 transfer fields, timestamped,
+sorted, and converted to finite floats. Empty or malformed histories receive
+the full schema with zeros. docs/FEATURES.md gives per-column formulas and
+rationale.
 
-batch_scan/
-    Contains:
-    - wallets.csv
+wallet_check.py also computes legacy graph and advanced features. Inference
+does not assume every generated key belongs to a model. Each model version
+stores its exact ordered feature list; align_features_for_token constructs the
+input frame from that list. This protects older model artifacts while the new
+trainer uses the canonical schema.
 
-    Used as a small batch input set.
-
-datasets deprecated/
-    Historical generated datasets. These are not active source code, but they
-    preserve earlier generated data:
-    - busd_labeled_v3.csv
-    - busd_labeled_v4.csv
-    - busd_training_ready.csv
-    - dai_labeled_v3.csv
-    - dai_labeled_v4.csv
-    - dai_training_ready.csv
-    - tusd_labeled_v3.csv
-    - tusd_labeled_v4.csv
-    - tusd_training_ready.csv
-    - usdc_labeled_auto.csv
-    - usdc_labeled_v3.csv
-    - usdc_labeled_v4.csv
-    - usdc_training_ready.csv
-    - usdp_labeled_v3.csv
-    - usdp_labeled_v4.csv
-    - usdp_training_ready.csv
-    - usdt_datasets.csv
-    - usdt_labeled_auto.csv
-    - usdt_labeled_v3.csv
-    - usdt_labeled_v4.csv
-    - usdt_training_ready.csv
-    - v0_busd.csv
-    - v0_dai.csv
-    - v0_tusd.csv
-    - v0_usdc.csv
-    - v0_usdp.csv
-    - v0_usdt.csv
-    - v1_busd.csv
-    - v1_dai.csv
-    - v1_tusd.csv
-    - v1_usdc.csv
-    - v1_usdp.csv
-    - v1_usdt.csv
-    - v3_busd.csv
-    - v3_clean_busd.csv
-    - v3_clean_dai.csv
-    - v3_clean_tusd.csv
-    - v3_clean_usdc.csv
-    - v3_clean_usdp.csv
-    - v3_clean_usdt.csv
-    - v3_dai.csv
-    - v3_raw_busd.csv
-    - v3_raw_dai.csv
-    - v3_raw_tusd.csv
-    - v3_raw_usdc.csv
-    - v3_raw_usdp.csv
-    - v3_raw_usdt.csv
-    - v3_tusd.csv
-    - v3_usdc.csv
-    - v3_usdp.csv
-    - v3_usdt.csv
-    - v4_busd.csv
-    - v4_dai.csv
-    - v4_tusd.csv
-    - v4_usdc.csv
-    - v4_usdp.csv
-    - v4_usdt.csv
-
-public address dataset/
-    Contains .gitkeep in this clone. main.py expects versioned wallet pool CSVs
-    here when USE_POOL_V* flags are enabled.
-
-.git/
-    Git metadata. Not part of runtime behavior.
+Internal-transaction, contract-verification/age, and network-relative gas
+features are documented as future/backfill work, not falsely advertised as
+active. They require extra provider quota and must be populated consistently in
+historical training data, collector data, and live inference before joining the
+schema.
 
 ===============================================================================
-8. API ECOSYSTEM
+6. TRAINING INTEGRITY AND MODEL VERSIONS
 ===============================================================================
 
-api.py defines the current backend surface.
+risk_system/training.py is the active trainer. It supports six token names and
+"all", four model modes (auto, rf, xgb, lgb), 50-5000 estimators, 2-10 folds,
+and 0-200 Optuna trials.
 
-GET /health
-    Returns:
-    - status
-    - timestamp
-    - supported_tokens
-    - trained_tokens
-    - graph_engine_available
+Data loading searches datasets/ first and the preserved local
+"datasets deprecated/" archive second. A file is accepted only when wallet and
+label columns exist. Labels outside 0=safe, 1=malicious, 2=poisoned are removed.
+Addresses are normalized/validated. Missing feature columns are zero-filled.
+Wallets carrying conflicting labels across source files are dropped entirely,
+then duplicate wallet rows are collapsed. Every class must exist and the
+smallest class must contain at least ten wallets.
 
-GET /model_info
-    Returns:
-    - trained_tokens
-    - supported_all_tokens
-    - graph_features_available
-    - api_version
-    - system_description
+The split is approximately 70% train, 15% validation, and 15% test, stratified
+by label after wallet deduplication. Candidate cross-validation uses a Pipeline
+containing StandardScaler and a cloned model, so each fold fits preprocessing
+only on its own training fold. The separate validation set contributes to model
+selection. The held-out test set is not used for candidate selection.
 
-POST /score_wallet
-    Request:
-    - address
-    - manual_token
-    - debug
+Candidate families are RandomForest, recall-weighted RandomForest, XGBoost,
+LightGBM, and recall-weighted LightGBM when installed. Optional Optuna TPE
+tunes LightGBM parameters. Its objective weights mean macro F1 at 75% and the
+minimum malicious/poisoned recall at 25%. The normal candidate selection score
+also combines CV macro F1, validation macro F1, and the minimum fraud recall.
 
-    Response:
-    - wallet, token, score, decision, reason
-    - probabilities
-    - confidence
-    - graph fields
-    - feature extraction status
-    - timestamp
-    - processing time
+After selection, a fresh scaler and selected model are fitted on train plus
+validation. Test predictions are then produced once. Metrics include accuracy,
+macro F1, fraud recalls, per-class precision/recall/F1/support, confusion
+matrix, one-vs-rest ROC-AUC, split counts/distributions, CV mean/std, candidate
+metrics, feature order, source-file/data-integrity counts, and tuning details.
 
-POST /batch_score
-    Request:
-    - addresses
-    - max_parallel
+Every successful version has a UTC timestamp, run id, and token in its name.
+The version directory contains model/scaler/features pickles, metrics.json, and
+manifest.json. Files are copied through temporary names into models/ to avoid a
+partially updated active set. active.json tracks the version for every token.
+rollback_model() validates token ownership and atomically restores a selected
+version without deleting later versions. wallet_check.clear_model_cache()
+ensures subsequent inference reloads restored artifacts.
 
-    Response:
-    - total_requested
-    - total_scored
-    - results
-    - batch_time_ms
+Measured active reports from 50-trial runs:
 
-===============================================================================
-9. TRAINING ECOSYSTEM
-===============================================================================
+USDT: test accuracy 0.9517, macro F1 0.8531, malicious recall 0.4167,
+poisoned recall 1.0000, CV macro F1 0.8634 +/- 0.0398.
 
-train_ml.py uses the following concept:
+USDC: test accuracy 0.9394, macro F1 0.8673, malicious recall 0.6364,
+poisoned recall 1.0000, CV macro F1 0.8329 +/- 0.0409.
 
-For each token:
-    1. Load available datasets.
-    2. Merge safe, malicious, poisoned, and unknown rows.
-    3. Build feature matrix using ALL_FEATURES.
-    4. Scale features with StandardScaler.
-    5. Oversample risk classes.
-    6. Split into train/validation.
-    7. Train one or more models.
-    8. Evaluate with F1 score.
-    9. Save best model artifacts.
-
-Model choices:
-    - rf
-    - xgb
-    - lgb
-    - auto
-
-Artifacts:
-    - models/<token>_model.pkl
-    - models/<token>_model_<best_name>.pkl
-    - models/<token>_scaler.pkl
-    - models/<token>_features.pkl
-
-Important methodology note:
-    Validation metrics generated by this current code should be treated as
-    development signals, not audited production performance. The pipeline should
-    be refactored to split first, then fit scalers and resamplers only on the
-    training fold.
+Neither meets the strict 0.90 macro-F1 and 0.90 per-fraud-class recall target.
+The generated reports say NOT MET and identify verified malicious-label volume
+as the next priority. No metric is promoted simply because raw accuracy exceeds
+90 percent.
 
 ===============================================================================
-10. GRAPH ECOSYSTEM
+7. RUNTIME SCORING
 ===============================================================================
 
-graph_engine.py can convert transactions into a graph where:
+wallet_check.py remains the compatibility-rich scoring engine. It validates
+addresses, rejects known token contracts as user-wallet inputs, fetches real
+transfer history through the new Etherscan client, detects token through manual
+override then tokenSymbol then contractAddress, generates features, applies
+defensive rules, lazy-loads token artifacts, aligns the stored feature schema,
+computes class probabilities, and returns a structured decision.
 
-- nodes are wallets;
-- edges are wallet-to-wallet transfers;
-- edge weight is cumulative value;
-- edge frequency is transaction count.
+score_wallet_data() is the backend-safe interface. Its response contains
+wallet, token, decision, score, reason, class probabilities, confidence,
+features, low-data state, assessment/data status, threat-intelligence evidence,
+and processing time. Reputation screening runs before chain-history retrieval.
+An attributed provider match returns BLOCK with BLOCKED_BY_REPUTATION. Empty
+histories and provider failures return REVIEW / UNSCORABLE with null class
+probabilities. The UI renders those as "not calculated", never as Normal 0%.
+Missing models and unrecognized token data also return REVIEW with an explicit
+reason. The older print-oriented score_wallet() remains for legacy scripts.
 
-Graph features can include:
+risk_system/reputation.py combines four independent sources. Local CSV exports
+are discovered under threat_intel/ and data/threat_intel/, plus paths supplied
+through THREAT_INTEL_FILES. Optional Etherscan Metadata uses getaddresstag;
+optional Chainabuse uses checked reports; optional public explorer screening
+matches only address-level warning phrases or risky page titles. It deliberately
+ignores phishing names appearing only in an ordinary wallet's transaction table.
+Responses are cached for THREAT_INTEL_CACHE_TTL_SECONDS and retain provider,
+name tag, label, reason, and errors for auditability.
 
-- node degree;
-- PageRank;
-- clustering coefficient;
-- betweenness centrality;
-- closeness centrality;
-- unique inbound/outbound counterparties;
-- suspicious clusters;
-- path distance to known malicious wallets;
-- inflow/outflow values;
-- transaction flow ratio.
+scripts/sync_threat_intel.py and the local API/UI sync action parse Etherscan's
+current Gas Guzzlers table into data/threat_intel/etherscan_gas_guzzlers.csv.
+Only rows carrying explicit phishing/scam/hack labels are imported. Merely being
+a high gas consumer is not evidence of abuse. The collector may assign label 1
+only to exact addresses from these attributed risk feeds; unrelated graph
+neighbors remain label -1.
 
-These graph features can enrich:
-
-- dataset generation in main.py;
-- runtime scoring in wallet_check.py;
-- visualization in dashboard.py;
-- future network graph UI work.
-
-===============================================================================
-11. LOCALHOST SURFACES
-===============================================================================
-
-FastAPI API:
-    python api.py
-    http://localhost:8000/docs
-    http://localhost:8000/health
-
-Static overview:
-    python -m http.server 8080
-    http://localhost:8080/
-    http://localhost:8080/checker.html
-    http://localhost:8080/training.html
-
-Streamlit dashboard:
-    streamlit run dashboard.py
-
-The static overview is documentation-only. The API and Streamlit dashboard are
-the current functional localhost surfaces.
+Graph enrichment is supplied by graph_engine.py when its local graph state is
+available. The graph engine uses NetworkX-style degree/centrality/PageRank,
+clusters, and neighbor-risk concepts. The live graph endpoint in api.py builds
+a directly inspectable network from persisted confirmed transfer events; this
+ensures the React graph is backed by current event records rather than static
+illustration data.
 
 ===============================================================================
-12. SECURITY AND PRODUCTION CAVEATS
+8. LIVE EVENTS, ALERTS, AND CASES
 ===============================================================================
 
-This section is explicit because this repository touches payout security.
+risk_system/live.py contains AlertStore and LiveEventBroker.
 
-Hardcoded keys:
-    main.py and wallet_check.py now load Etherscan API keys from environment
-    variables. Previously exposed keys still require rotation and Git history
-    scrubbing before real production use.
+AlertStore creates data/risk_system.db with events and cases tables plus useful
+indexes. add_event() upserts by stable event id. OBSERVED chain transfers stay
+events; REVIEW/BLOCK results also create or update one case per event. Cases
+support open, reviewed, dismissed, and escalated status plus assignee/note and
+timestamps. Statistics return decision totals, open-case count, and top risky
+wallets based on real persisted review/block events.
 
-Tracked .env:
-    .env exists in the clone. It should be removed from tracking and replaced by
-    .env.example with placeholders.
+LiveEventBroker manages subscribers with bounded queues. Slow clients lose the
+oldest queued browser event rather than exhausting memory. It parses only the
+six configured stablecoin Transfer contracts and marks source as websocket or
+etherscan. It persists/publishes observed facts immediately, then scores a
+bounded number of recipients per block in background tasks. LIVE_SCORE_MAX_PER_BLOCK
+and LIVE_MAX_EVENTS_PER_BLOCK protect provider quota and CPU.
 
-Generated artifacts:
-    CSV and pickle artifacts are tracked despite .gitignore rules. This can make
-    repository history large and can leak sensitive data if datasets contain
-    private labels or proprietary wallet sets.
-
-Dependency completeness:
-    requirements.txt now includes API, dashboard, graph, and stream runtime
-    dependencies. Deep-learning stacks remain optional and should be installed
-    deliberately when GNN/LSTM/Transformer work is needed.
-
-Metrics:
-    Any accuracy/F1/recall claims should be regenerated with a leakage-free
-    train/validation/test process before being used in production documents.
+WebSocket disconnects enter reconnecting state and use exponential backoff from
+one to thirty seconds. Etherscan polling observes ETHERSCAN_LIVE_POLL_SECONDS.
+Errors are recorded in broker status and structured logs. stream_listener.py
+wraps this exact broker, proving the standalone and API paths do not have two
+different event implementations.
 
 ===============================================================================
-13. RECOMMENDED NEXT ENGINEERING PASS
+9. FASTAPI SERVICE
 ===============================================================================
 
-1. Move every API key to environment variables.
-2. Rotate exposed keys and database credentials.
-3. Scrub leaked secrets from Git history.
-4. Split dependencies into base/api/dashboard/dev/optional extras.
-5. Add real stream_listener.py bridging behind /ws/live-alerts.
-6. Generate fresh model performance reports with the leakage-free training flow.
-7. Expand the checker UI into a full React/Vite console if desired.
-8. Add tests under tests/.
-9. Add CI for lint, tests, dependency import checks, and secret scanning.
-10. Decide whether Streamlit remains the ops dashboard or whether a React
-    security console should replace it.
+api.py creates the application and lifespan. Startup loads the untracked .env,
+configures structured logging, initializes stores/caches/job registries, and
+starts the live broker. Shutdown stops its task cleanly.
+
+Public data routes include:
+
+- GET /health: API/version, provider status, configured-key count, model
+  availability, database/cache health, graph support, auth and local-operation
+  state.
+- GET /metrics: Prometheus request counters, total latency, inference latency,
+  and cache hits.
+- POST /score_wallet and POST /batch_score: structured scoring.
+- GET /model_info and /get_model_info: model/runtime metadata.
+- GET /live/status and GET /alerts: real provider/event state.
+- GET /alerts/statistics: decision and top-risk aggregates.
+- GET /cases and PATCH /cases/{case_id}: shared review workflow.
+- GET /graph: nodes and edges derived from persisted transfer events.
+- GET collection and training histories/status/version information.
+- WS /ws/live-alerts: status heartbeats plus only real persisted events.
+
+Local mutation routes include collection start/cancel, training start/cancel,
+and rollback. require_local_operation checks ENABLE_LOCAL_TRAINING and rejects
+Netlify/static contexts. The browser adds a second usability lock based on
+localhost, but backend enforcement is authoritative.
+
+API_KEYS_SHA256 is a comma-separated set of accepted SHA-256 digests. With
+REQUIRE_API_AUTH=true, X-API-Key is hashed and constant-time compared. Raw keys
+are not stored or returned. A configurable in-memory minute window enforces
+API_RATE_LIMIT_PER_MINUTE and emits structured 429 responses. Localhost is
+exempt by default for browser development; RATE_LIMIT_LOCALHOST=true opts it
+into the same limit. CORS_ORIGINS is environment-driven.
+
+TTLCache uses Redis when REDIS_URL connects successfully and otherwise uses a
+locked local memory cache. Cached score payloads expire according to
+SCORE_CACHE_TTL_SECONDS. Prometheus distinguishes Redis and memory hits.
+
+JobRegistry persists JSON state under data/jobs/collection and
+data/jobs/training. Worker threads report progress and use cancellation Events.
+The API never blocks a request for the full multi-minute collection/training
+operation.
 
 ===============================================================================
-14. SHORT MENTAL MODEL
+10. DATABASE AND CACHE LAYER
 ===============================================================================
 
-Think of the system as five connected machines:
+db.py is the optional durable feature/label service. DATABASE_URL enables
+PostgreSQL. It creates wallet_features and labels schema/indexes when possible,
+uses per-call cursors guarded by a thread lock, and exposes a health probe. When
+REDIS_URL is present it maintains a fast feature layer in front of Postgres.
+Postgres remains durable; Redis is acceleration, not replacement.
 
-1. Collector:
-    main.py gathers and expands wallet data.
+The API response cache and db.py feature cache use the same Redis service but
+different key responsibilities. docker-compose.yml provisions both Redis and
+PostgreSQL and gives the API internal service URLs. Local operation can run
+without either, but /health reports the actual state.
 
-2. Trainer:
-    train_ml.py turns datasets into token models.
+===============================================================================
+11. REACT SECURITY CONSOLE
+===============================================================================
 
-3. Scorer:
-    wallet_check.py turns one wallet into one decision.
+frontend/ is a strict TypeScript Vite application with React, Tailwind's Vite
+integration, Lucide icons, Recharts, and Cytoscape. It has two HTML entries:
+index.html opens the operational console; training.html opens directly to local
+collection/training. Both use the same compiled application and backend client.
 
-4. Server:
-    api.py turns scorer logic into HTTP endpoints.
+The principal views in frontend/src/App.tsx are:
 
-5. Operator surfaces:
-    dashboard.py, stream_listener.py, and index.html help humans view or operate
-    the system locally.
+- Command Center: live connection, counts, recent alerts, top risky wallets,
+  token activity, and compact time/decision charts.
+- Wallet Investigate: validated address/token input and full backend response.
+- Live Transaction Stream: filterable persisted/live event table.
+- Wallet Network Graph: interactive Cytoscape nodes/edges from /graph.
+- Alerts & Case Management: open/reviewed/dismissed/escalated workflow.
+- Model Performance: active/versioned metrics and safety-target visibility.
+- Collection & Training: 1-1,000,000 target, token/seed controls, checkpointed
+  jobs, Optuna trial budget, progress, versions, and restore action.
+- Settings: API URL/key entry and masked connection/dependency state.
 
-Everything else either stores data, stores models, documents historical fixes,
-or tests one part of those machines.
+frontend/src/api.ts is the only network client. It adds X-API-Key, normalizes
+errors, stores local connection settings, and constructs HTTP/WebSocket URLs.
+frontend/src/types.ts defines the API payload contracts. frontend/src/utils.ts
+contains address/time display helpers; utils.test.ts verifies them.
+frontend/src/styles.css defines the responsive dark operational design, stable
+control dimensions, status colors, tables, graph canvas, and reduced-motion
+behavior. frontend/src/main.tsx selects the initial page and mounts React.
+vite.config.ts defines React/Tailwind plugins, dual build entries, and the /api
+HTTP/WebSocket development proxy. netlify.toml configures build output and
+security headers. frontend/README.md is the package runbook.
+
+Netlify serves static assets only. A static build cannot execute Python, train
+models, retain provider WebSockets, or safely hold Etherscan secrets. It must
+point at a separately hosted API through VITE_API_BASE_URL. Local mutation
+controls remain locked outside localhost.
+
+===============================================================================
+12. EVERY TRACKED SOURCE AND CONFIGURATION FILE
+===============================================================================
+
+Root runtime files:
+
+api.py - FastAPI application, middleware, schemas, auth, rate limits, cache,
+jobs, scoring routes, live routes, cases, graph, health, metrics, and WebSocket.
+
+db.py - PostgreSQL/Redis feature and label persistence plus health checks.
+
+wallet_check.py - full legacy-compatible rule/ML wallet scoring implementation.
+
+main.py - historical V0-V4 seed expansion and dataset generation. Active keys
+are environment-loaded; missing-comma seed bugs were corrected. Kept because it
+contains the broader 54-token historical workflow.
+
+train_ml.py - repaired historical trainer. Split/scaling order was corrected,
+but new training should use risk_system/training.py for versioning and reports.
+
+stream_listener.py - standalone real LiveEventBroker entry point.
+
+dashboard.py - retained legacy Streamlit internal dashboard; React is primary.
+
+graph_engine.py - NetworkX wallet graph creation, statistics, clustering, and
+graph risk features.
+
+gnn_model.py - optional PyTorch Geometric GCN/GAT/GraphSAGE research code,
+import-safe without Torch.
+
+deep_model.py - optional sequence/deep-learning research code with guarded
+heavy imports.
+
+scan_and_report.py - historical local inventory/report helper.
+
+model_tester.py - historical model artifact load sanity helper.
+
+checker.html, training.html, index.html - earlier static/local pages preserved
+for compatibility. The maintained product UI is frontend/.
+
+Package files:
+
+risk_system/__init__.py - package version 3.0.0.
+risk_system/contracts.py - canonical stablecoin contracts/decimals/topic.
+risk_system/etherscan.py - rate-limited rotating Etherscan V2 client.
+risk_system/reputation.py - attributed local/remote reputation aggregation,
+cache, explicit-warning parser, and Gas Guzzler risk-label synchronization.
+risk_system/features.py - canonical model feature schema and extractor.
+risk_system/collector.py - resumable selectable large-wallet collector.
+risk_system/training.py - leakage-safe tuning/version/report/rollback system.
+risk_system/live.py - real provider broker plus unified SQLite event/case store.
+
+Operational scripts:
+
+scripts/__init__.py - scripts namespace marker.
+scripts/start_local.py - starts FastAPI and Vite together, prints both links,
+propagates Ctrl+C, and enables local operations for that process.
+scripts/collect_wallets.py - CLI for large resumable real-Etherscan collection.
+scripts/train_models.py - CLI for versioned model training and Optuna budget.
+scripts/evaluate_model.py - regenerates/prints an active version's report from
+stored machine-readable metrics.
+scripts/sync_threat_intel.py - imports only explicitly risk-labeled Etherscan
+Gas Guzzler rows into the ignored local threat-intelligence dataset.
+
+Frontend files:
+
+frontend/index.html - command-center HTML entry.
+frontend/training.html - training-console HTML entry.
+frontend/public/favicon.svg - shared browser-tab shield mark.
+frontend/src/main.tsx - React bootstrap and initial-view selection.
+frontend/src/App.tsx - all console views, controls, polling, and live updates.
+frontend/src/api.ts - backend/WebSocket transport and browser connection config.
+frontend/src/types.ts - TypeScript API types.
+frontend/src/utils.ts - display utility functions.
+frontend/src/utils.test.ts - Vitest unit tests.
+frontend/src/styles.css - domain-specific responsive visual system.
+frontend/src/vite-env.d.ts - Vite environment typing.
+frontend/vite.config.ts - plugins, proxy, and dual-page build.
+frontend/eslint.config.js - frontend lint rules.
+frontend/tsconfig.json - TypeScript project references.
+frontend/tsconfig.app.json - strict browser compiler settings.
+frontend/tsconfig.node.json - strict no-emit Vite config settings.
+frontend/package.json - pinned package set and dev/build/lint/test commands.
+frontend/package-lock.json - exact npm dependency graph.
+frontend/netlify.toml - Netlify build path and response security headers.
+frontend/README.md - frontend run/deploy boundary documentation.
+
+Test files:
+
+tests/conftest.py - repository/test environment bootstrap.
+tests/unit/test_features.py - canonical feature order and calculation coverage.
+tests/unit/test_collector.py - fake-client BFS/checkpoint behavior without
+network calls.
+tests/unit/test_training.py - wallet deduplication/split integrity behavior.
+tests/unit/test_live.py - Transfer parsing and SQLite event/case persistence.
+tests/unit/test_reputation.py - local/remote reputation parsing, malformed-feed
+handling, false-positive protection, and explicit Gas Guzzler label filtering.
+tests/unit/test_scoring_fail_closed.py - reputation-first blocking and provider
+failure REVIEW / UNSCORABLE behavior with null probabilities.
+tests/integration/test_api.py - health/scoring guards and WebSocket no-demo
+behavior through FastAPI TestClient.
+
+tests/legacy/ contains eight renamed historical regression scripts:
+legacy_test_contract_skip.py, legacy_test_decision_fix.py,
+legacy_test_feature_fix.py, legacy_test_rules.py, legacy_test_token_detect.py,
+legacy_test_token_expansion.py, legacy_test_token_integration.py, and
+legacy_test_wallet_check_fix.py. They document prior defects but their
+legacy_ prefix keeps stale environment assumptions outside automatic pytest
+discovery. Their core behaviors are represented in the new tests where
+applicable.
+
+Build and quality files:
+
+requirements.txt - pinned core Python data, HTTP, DB, logging, validation, and
+metrics dependencies.
+requirements-api.txt - includes core plus FastAPI, Uvicorn, WebSockets, aiohttp,
+and Redis.
+requirements-ml.txt - includes core plus XGBoost, LightGBM, and Optuna.
+requirements-dashboard.txt - Streamlit, Plotly, and NetworkX legacy extras.
+requirements-dev.txt - API/ML plus pytest, type/lint, pre-commit, and secret
+scan tools.
+requirements-deep.txt - pinned optional Torch/TensorFlow research environment;
+platform/CUDA compatibility must still be checked before installation.
+pyproject.toml - package metadata, pytest discovery, Ruff, and mypy settings.
+.gitattributes - LF text normalization.
+.gitignore - excludes secrets, virtualenvs, caches, generated CSV/pickle data,
+models, model versions, data jobs, node modules, builds, and test artifacts.
+.dockerignore - excludes local/generated content from Docker context.
+.env.example - placeholders and documented runtime switches only.
+.pre-commit-config.yaml - local detect-secrets hook.
+.secrets.baseline - reviewed current-tree secret scanner baseline.
+Dockerfile - Python 3.12 API image with CPU ML dependencies.
+docker-compose.yml - API/Postgres/Redis services, health checks, volumes.
+.github/workflows/ci.yml - backend secret/lint/format/type/test and frontend
+install/lint/test/build jobs on push and pull request.
+
+Documentation files:
+
+README.md - compact overview, real metrics, links, setup, deployment, credit.
+technical.txt - this complete ecosystem document.
+AUDIT.md - phase-zero verified security/methodology/build findings.
+IMPLEMENTATION_LOG.md - chronological changes, verification, limitations.
+docs/ARCHITECTURE.md - current boundaries and failure behavior.
+docs/FEATURES.md - canonical feature formulas and schema policy.
+docs/DEEP_MODELS.md - optional model boundary and installation caveats.
+docs/AGENT_BUILD_PROMPT.md - original complete user engineering specification.
+docs/model_performance/usdt_report.md - generated active USDT held-out report.
+docs/model_performance/usdc_report.md - generated active USDC held-out report.
+docs/assets/console.png - browser-captured maintained console image for README.
+threat_intel/README.md - provider CSV schema, attribution, licensing, and
+public-explorer opt-in guidance.
+
+Historical documentation was moved without deletion into docs/history/:
+
+CRITICAL_FIX_SUMMARY.md - prior critical wallet/token detection fix narrative.
+MULTI_TOKEN_IMPLEMENTATION.md - prior multi-token implementation record.
+MULTI_TOKEN_SETUP_COMPLETE.md - prior setup completion status.
+TOKEN_DETECTION_FIX.md - historical three-level token detection correction.
+TOKEN_EXPANSION_README.md - earlier token expansion notes.
+TOKEN_SPECIFIC_RULES.md - historical per-token rule reference.
+WALLET_CHECK_USAGE_GUIDE.md - legacy scorer usage guide.
+pipeline.txt - earlier pipeline description.
+structure.txt and structure copy.txt - earlier compact repository maps.
+
+public address dataset/.gitkeep preserves an intentionally empty directory for
+local/public reference data without committing generated datasets.
+
+===============================================================================
+13. GENERATED AND LOCAL-ONLY ARTIFACTS
+===============================================================================
+
+.env contains local secrets/settings and is ignored.
+.venv/ is the local Python environment and is ignored.
+frontend/node_modules/ and frontend/dist/ are ignored dependency/build outputs.
+data/ holds SQLite, API jobs, collection checkpoints, and outputs; ignored.
+models/ holds active model/scaler/feature pickles; ignored.
+model_versions/ holds immutable local versions and active.json; ignored.
+training_runs.json is a legacy local run journal; ignored.
+wallet_pool.csv and v4_wallet_pool.csv are large local seed pools excluded by
+the global CSV ignore rule.
+"backup models/" and "datasets deprecated/" remain on the current machine for
+preservation but are removed from future Git tracking. Existing history still
+contains old binaries until a coordinated history rewrite occurs.
+backups/ and batch_scan/ are historical local output areas; CSV/pickle payloads
+are ignored even when directories remain.
+
+===============================================================================
+14. SECURITY CONTROLS AND OUTSTANDING HISTORY RISK
+===============================================================================
+
+Current HEAD obtains provider/database credentials from the environment. API
+consumer keys are represented only by hashes. The frontend never receives
+provider secrets. Local mutations require an explicit environment switch and a
+local-host context. CORS and rate limits are configurable. Logs and health
+responses report counts/state, not secret values. Secret scanning runs before
+commit and in CI.
+
+The repository's old Git history contained .env and hardcoded Etherscan keys.
+Removing them from HEAD does not revoke or erase them. Provider-side rotation
+is mandatory. A full git-filter-repo/BFG rewrite plus force-push would replace
+commit identities for every collaborator and therefore remains an explicitly
+coordinated destructive operation. Until done, treat historical credentials as
+compromised and require every collaborator to re-clone after the rewrite.
+
+The current local .env contains a database URL. It is ignored and untracked,
+but its password should also be rotated if it ever appeared in remote history.
+
+===============================================================================
+15. VERIFICATION AND OPERATING COMMANDS
+===============================================================================
+
+Backend quality gate:
+
+  .\.venv\Scripts\python.exe -m ruff check api.py db.py risk_system scripts stream_listener.py tests
+  .\.venv\Scripts\python.exe -m ruff format --check api.py db.py risk_system scripts stream_listener.py tests
+  .\.venv\Scripts\python.exe -m mypy --follow-imports=skip risk_system api.py db.py stream_listener.py
+  .\.venv\Scripts\python.exe -m pytest
+
+Frontend quality gate:
+
+  cd frontend
+  npm run lint
+  npm test
+  npm run build
+
+Operations:
+
+  python scripts\start_local.py
+  python scripts\collect_wallets.py --target 50000 --tokens USDT USDC
+  python scripts\train_models.py --token usdt --model auto --tuning-trials 50
+  python scripts\evaluate_model.py --token usdt
+  docker compose up --build
+
+Local URLs:
+
+  http://127.0.0.1:5173/
+  http://127.0.0.1:5173/training.html
+  http://127.0.0.1:8000/docs
+  http://127.0.0.1:8000/health
+  http://127.0.0.1:8000/metrics
+
+===============================================================================
+16. KNOWN LIMITS AND NEXT EVOLUTION
+===============================================================================
+
+1. USDT and USDC malicious recall remain below the 0.90 target. More trusted,
+   diverse malicious labels are required; tuning alone did not close the gap.
+2. DAI/BUSD/USDP/TUSD cannot all support honest three-class held-out evaluation
+   from current local historical labels. The trainer blocks misleading runs.
+3. A 50,000-wallet crawl is quota/time intensive and must be allowed to resume.
+4. Alert/case SQLite is appropriate for standalone mode. Multi-instance API
+   deployment should migrate this store to PostgreSQL with coordinated schema
+   migrations and shared pub/sub.
+5. API minute-window limiting is process-local. Distributed deployment should
+   move rate-limit counters to Redis.
+6. Full tracing/APM is not shipped; JSON logs and Prometheus metrics are the
+   current observability baseline.
+7. Deep/GNN research models are not integrated into active rollback/deployment.
+8. Netlify cannot host the Python backend or local training; deploy FastAPI
+   separately and set VITE_API_BASE_URL for a connected static console.
+9. Historical secret/binary removal requires an approved force-pushed history
+   rewrite and collaborator re-clone.
+
+END OF TECHNICAL ECOSYSTEM REFERENCE

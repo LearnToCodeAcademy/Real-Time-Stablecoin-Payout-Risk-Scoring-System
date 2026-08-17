@@ -163,7 +163,12 @@
       }
 
       function setProb(id, value) {
-        const pct = Math.round((Number(value) || 0) * 100);
+        if (value === null || value === undefined) {
+          $(`#${id}`).style.width = "0%";
+          $(`#${id}Text`).textContent = "N/A";
+          return;
+        }
+        const pct = Math.round(Number(value) * 100);
         $(`#${id}`).style.width = `${pct}%`;
         $(`#${id}Text`).textContent = `${pct}%`;
       }
