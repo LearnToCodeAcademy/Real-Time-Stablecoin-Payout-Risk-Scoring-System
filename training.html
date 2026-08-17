@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Model Training Console</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #070b12;
+        --panel: rgba(15, 23, 42, 0.82);
+        --line: rgba(34, 211, 238, 0.28);
+        --text: #edf7ff;
+        --muted: #9fb4ca;
+        --cyan: #22d3ee;
+        --green: #34d399;
+        --amber: #f59e0b;
+        --red: #fb7185;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 18% 18%, rgba(34, 211, 238, .18), transparent 28rem),
+          radial-gradient(circle at 88% 12%, rgba(245, 158, 11, .12), transparent 24rem),
+          linear-gradient(180deg, #070b12, #0b1220);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 40px 0; }
+      header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 20px; }
+      h1 { margin: 8px 0 10px; font-size: clamp(32px, 6vw, 64px); line-height: .95; }
+      p { color: var(--muted); line-height: 1.6; }
+      .eyebrow { color: var(--cyan); text-transform: uppercase; letter-spacing: .18em; font-size: 12px; font-weight: 800; }
+      .panel {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, .34);
+        backdrop-filter: blur(16px);
+      }
+      .grid { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; }
+      label { display: block; color: var(--muted); font-size: 13px; margin: 14px 0 7px; }
+      select, input {
+        width: 100%;
+        border: 1px solid rgba(148, 163, 184, .24);
+        background: rgba(2, 6, 23, .6);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      button {
+        border: 1px solid var(--line);
+        background: rgba(8, 145, 178, .22);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 12px 14px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+      button.secondary { background: rgba(15, 23, 42, .7); }
+      button.danger { border-color: rgba(251, 113, 133, .55); background: rgba(127, 29, 29, .38); }
+      .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+      .status {
+        margin-top: 14px;
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(148, 163, 184, .18);
+        color: var(--muted);
+        font-family: "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
+        white-space: pre-wrap;
+      }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 12px; border-bottom: 1px solid rgba(148, 163, 184, .14); text-align: left; vertical-align: top; }
+      th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .12em; }
+      td { font-family: "JetBrains Mono", "Cascadia Code", ui-monospace, monospace; font-size: 13px; }
+      .success { color: var(--green); }
+      .failed { color: var(--red); }
+      .running, .queued { color: var(--amber); }
+      .note { border-left: 3px solid var(--amber); padding-left: 12px; }
+      a { color: var(--cyan); }
+      @media (max-width: 900px) {
+        header, .grid { display: block; }
+        .panel { margin-bottom: 16px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">Standalone only</div>
+          <h1>Local model training console.</h1>
+          <p>Trigger training, watch run history, and roll back to the model snapshot from before a run.</p>
+        </div>
+        <p><a href="./index.html">Overview</a> · <a href="./README.md">README</a></p>
+      </header>
+
+      <section class="grid">
+        <div class="panel">
+          <p class="note">Training is intentionally disabled unless your local API runs with <strong>ENABLE_LOCAL_TRAINING=true</strong>. Static hosts such as Netlify should not run training.</p>
+          <label for="apiBase">API base URL</label>
+          <input id="apiBase" value="http://localhost:8000" />
+
+          <label for="token">Token</label>
+          <select id="token">
+            <option value="all">All trained tokens</option>
+            <option value="usdt">USDT</option>
+            <option value="usdc">USDC</option>
+            <option value="busd">BUSD</option>
+            <option value="dai">DAI</option>
+            <option value="usdp">USDP</option>
+            <option value="tusd">TUSD</option>
+          </select>
+
+          <label for="model">Model</label>
+          <select id="model">
+            <option value="auto">Auto compare</option>
+            <option value="rf">RandomForest</option>
+            <option value="xgb">XGBoost</option>
+            <option value="lgb">LightGBM</option>
+          </select>
+
+          <div class="actions">
+            <button id="trainButton">Train</button>
+            <button class="secondary" id="refreshButton">Refresh</button>
+          </div>
+          <div class="status" id="status">Waiting for local API...</div>
+        </div>
+
+        <div class="panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Status</th>
+                <th>Token</th>
+                <th>Model</th>
+                <th>Best F1</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="history"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const statusEl = document.querySelector("#status");
+      const historyEl = document.querySelector("#history");
+      const apiBaseEl = document.querySelector("#apiBase");
+
+      function api(path) {
+        return `${apiBaseEl.value.replace(/\/$/, "")}${path}`;
+      }
+
+      function setStatus(message) {
+        statusEl.textContent = message;
+      }
+
+      async function refreshHistory() {
+        try {
+          const response = await fetch(api("/training/history"));
+          if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+          const runs = await response.json();
+          historyEl.innerHTML = "";
+          for (const run of runs) {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+              <td>${run.run_id}</td>
+              <td class="${run.status}">${run.status}</td>
+              <td>${run.token}</td>
+              <td>${run.model}</td>
+              <td>${run.best_f1_macro ?? "-"}</td>
+              <td>${run.rollback_available ? `<button class="danger" data-run="${run.run_id}">Rollback</button>` : "-"}</td>
+            `;
+            historyEl.appendChild(row);
+          }
+          setStatus(runs.length ? `Loaded ${runs.length} training runs.` : "No training runs yet.");
+        } catch (error) {
+          setStatus(`Could not load training history. Start the local API and enable training.\n${error.message}`);
+        }
+      }
+
+      async function startTraining() {
+        const payload = {
+          token: document.querySelector("#token").value,
+          model: document.querySelector("#model").value
+        };
+        setStatus("Queuing training run...");
+        try {
+          const response = await fetch(api("/training/train"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+          const run = await response.json();
+          setStatus(`Training queued: ${run.run_id}`);
+          await refreshHistory();
+        } catch (error) {
+          setStatus(`Training did not start.\n${error.message}`);
+        }
+      }
+
+      async function rollback(runId) {
+        setStatus(`Rolling back ${runId}...`);
+        try {
+          const response = await fetch(api(`/training/rollback/${runId}`), { method: "POST" });
+          if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+          await refreshHistory();
+          setStatus(`Rollback complete for ${runId}.`);
+        } catch (error) {
+          setStatus(`Rollback failed.\n${error.message}`);
+        }
+      }
+
+      document.querySelector("#trainButton").addEventListener("click", startTraining);
+      document.querySelector("#refreshButton").addEventListener("click", refreshHistory);
+      historyEl.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-run]");
+        if (button) rollback(button.dataset.run);
+      });
+      refreshHistory();
+      setInterval(refreshHistory, 5000);
+    </script>
+  </body>
+</html>

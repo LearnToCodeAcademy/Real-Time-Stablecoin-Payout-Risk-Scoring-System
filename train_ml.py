@@ -507,124 +507,88 @@ def train_token_model(token, model_choice="auto"):
 
     
 
-    # Scale features
-    scaler = StandardScaler()
+    # Split before fitting scalers or oversampling to avoid validation leakage.
+    sample_weight = weights if (isinstance(weights, np.ndarray) and len(weights) == len(df)) else None
+    labeled_mask = y != -1
+    unknown_mask = y == -1
 
-    X_scaled = scaler.fit_transform(X)
+    if labeled_mask.any():
+        X_labeled_raw = X.loc[labeled_mask].reset_index(drop=True)
+        y_labeled = y.loc[labeled_mask].reset_index(drop=True)
+        w_labeled = sample_weight[np.asarray(labeled_mask)] if sample_weight is not None else None
+        stratify = y_labeled if y_labeled.nunique() > 1 and y_labeled.value_counts().min() > 1 else None
 
+        try:
+            if w_labeled is not None:
+                X_train_raw, X_val_raw, y_train, y_val, w_train, w_val = train_test_split(
+                    X_labeled_raw,
+                    y_labeled,
+                    w_labeled,
+                    test_size=0.2,
+                    stratify=stratify,
+                    random_state=42,
+                )
+            else:
+                X_train_raw, X_val_raw, y_train, y_val = train_test_split(
+                    X_labeled_raw,
+                    y_labeled,
+                    test_size=0.2,
+                    stratify=stratify,
+                    random_state=42,
+                )
+                w_train = w_val = None
+        except Exception:
+            if w_labeled is not None:
+                X_train_raw, X_val_raw, y_train, y_val, w_train, w_val = train_test_split(
+                    X_labeled_raw,
+                    y_labeled,
+                    w_labeled,
+                    test_size=0.2,
+                    random_state=42,
+                )
+            else:
+                X_train_raw, X_val_raw, y_train, y_val = train_test_split(
+                    X_labeled_raw,
+                    y_labeled,
+                    test_size=0.2,
+                    random_state=42,
+                )
+                w_train = w_val = None
 
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train_raw)
+        X_val = scaler.transform(X_val_raw)
+        y_train = y_train.reset_index(drop=True)
+        y_val = y_val.reset_index(drop=True)
+        w_train = np.asarray(w_train) if w_train is not None else None
 
-    # =============================
-
-    # HANDLE CLASS IMBALANCE: OVERSAMPLE MINORITY CLASSES
-
-    # =============================
-
-    # Many samples are labeled -1 (unknown); focus on clear labels (0, 1, 2)
-    labeled_indices = y[y != -1].index.tolist()  # Keep only labeled samples
-
-    unknown_indices = y[y == -1].index.tolist()  # Set aside unknown (-1) samples
-
-    
-
-    # Oversample minority malicious/poisoned classes to balance training
-
-    if len(labeled_indices) > 0:
-
-        X_labeled = X_scaled[labeled_indices]
-
-        y_labeled = y[labeled_indices]
-
-        
-
-        # Identify safe (0) and risk (1, 2) samples
-
-        safe_idx = [i for i, idx in enumerate(labeled_indices) if y.iloc[idx] == 0]
-
-        risk_idx = [i for i, idx in enumerate(labeled_indices) if y.iloc[idx] in [1, 2]]
-
-        
-
-        # Oversample risk classes if too few
+        safe_idx = [i for i, label in enumerate(y_train) if label == 0]
+        risk_idx = [i for i, label in enumerate(y_train) if label in [1, 2]]
 
         if len(risk_idx) > 0 and len(safe_idx) > len(risk_idx) * 3:
-
-            # Duplicate risk samples to improve balance
-
-            target_risk = len(safe_idx) // 3  # Set risk to ~1/3 of safe
-
+            target_risk = len(safe_idx) // 3
             if len(risk_idx) < target_risk:
-
-                boost_amount = target_risk - len(risk_idx)
-
-                sampled_indices = resample(risk_idx, n_samples=len(risk_idx) + boost_amount, random_state=42)
-
+                sampled_indices = resample(risk_idx, n_samples=target_risk, replace=True, random_state=42)
                 oversampled_indices_local = safe_idx + sampled_indices
+                X_train = np.vstack([X_train[i] for i in oversampled_indices_local])
+                y_train = pd.Series([y_train.iloc[i] for i in oversampled_indices_local]).reset_index(drop=True)
+                if w_train is not None:
+                    w_train = np.asarray([w_train[i] for i in oversampled_indices_local])
 
-                X_labeled = np.vstack([X_labeled[i] for i in oversampled_indices_local])
-
-                y_labeled = pd.Series([y_labeled.iloc[i] for i in oversampled_indices_local]).reset_index(drop=True)
-
-        
-
-        # Append unknown samples (lower weight) for supplementary learning
-
-        if len(unknown_indices) > 0:
-
-            X_unknown = X_scaled[[i for i, idx in enumerate(range(len(X_scaled))) if idx in unknown_indices]]
-
-            y_unknown = y[unknown_indices].reset_index(drop=True)
-
-            X_train_combined = np.vstack([X_labeled, X_unknown])
-
-            y_train_combined = pd.concat([y_labeled, y_unknown], ignore_index=True)
-
-        else:
-
-            X_train_combined = X_labeled
-
-            y_train_combined = y_labeled
-
+        if unknown_mask.any():
+            X_unknown_raw = X.loc[unknown_mask].reset_index(drop=True)
+            y_unknown = y.loc[unknown_mask].reset_index(drop=True)
+            X_unknown = scaler.transform(X_unknown_raw)
+            X_train = np.vstack([X_train, X_unknown])
+            y_train = pd.concat([y_train, y_unknown], ignore_index=True)
+            if w_train is not None:
+                w_unknown = sample_weight[np.asarray(unknown_mask)]
+                w_train = np.concatenate([w_train, w_unknown])
     else:
-
-        X_train_combined = X_scaled
-
-        y_train_combined = y
-
-
-
-    # Train / compare multiple models (RandomForest, XGBoost, LightGBM if available)
-    sample_weight = weights if (isinstance(weights, np.ndarray) and len(weights) == len(df)) else None
-
-
-
-    # Stratified split when possible
-
-    try:
-
-        if sample_weight is not None:
-
-            X_train, X_val, y_train, y_val, w_train, w_val = train_test_split(X_train_combined, y_train_combined, sample_weight, test_size=0.2, stratify=y_train_combined, random_state=42)
-
-        else:
-
-            X_train, X_val, y_train, y_val = train_test_split(X_train_combined, y_train_combined, test_size=0.2, stratify=y_train_combined, random_state=42)
-
-            w_train = w_val = None
-
-    except Exception:
-
-        # fallback without stratify
-
-        if sample_weight is not None:
-
-            X_train, X_val, y_train, y_val, w_train, w_val = train_test_split(X_train_combined, y_train_combined, sample_weight, test_size=0.2, random_state=42)
-
-        else:
-
-            X_train, X_val, y_train, y_val = train_test_split(X_train_combined, y_train_combined, test_size=0.2, random_state=42)
-
-            w_train = w_val = None
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        X_train, X_val, y_train, y_val = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+        w_train = w_val = None
 
 
 

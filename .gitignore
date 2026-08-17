@@ -1,5 +1,9 @@
 # Python
 __pycache__/
+.pytest_tmp/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 *.py[cod]
 *$py.class
 *.so
@@ -29,3 +33,17 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Local training runtime artifacts
+training_runs.json
+model_versions/
+models/
+data/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+playwright-report/
+test-results/
+.playwright-cli/

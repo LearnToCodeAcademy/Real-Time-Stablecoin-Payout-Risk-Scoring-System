@@ -1,0 +1,4 @@
+-r requirements.txt
+streamlit==1.61.1
+plotly==6.9.0
+networkx==3.6.1

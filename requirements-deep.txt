@@ -1,0 +1,5 @@
+# Install only in a separate deep-learning environment. PyTorch Geometric
+# wheels depend on the selected PyTorch/CUDA combination; see docs/DEEP_MODELS.md.
+torch==2.10.0
+torch-geometric==2.7.0
+tensorflow==2.21.0
