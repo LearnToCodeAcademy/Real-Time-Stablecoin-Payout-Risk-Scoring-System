@@ -1,0 +1,896 @@
+REAL-TIME STABLECOIN PAYOUT RISK SCORING SYSTEM
+TECHNICAL ECOSYSTEM MAP
+
+Credit: John Marwin Ebona
+
+This file explains how the repository fits together as an ecosystem. It is
+intentionally long and explicit. The README is the compact front door; this
+file is the engineering map.
+
+===============================================================================
+1. SYSTEM PURPOSE
+===============================================================================
+
+The system is a Python-based wallet risk intelligence engine for stablecoin and
+token payouts. Its goal is to evaluate a wallet before or during payout and
+return a practical operational decision:
+
+- ALLOW: payout can continue.
+- REVIEW: suspicious signal exists and a human should review.
+- BLOCK: high-risk malicious or poisoned wallet behavior was detected.
+
+The system does this by combining:
+
+- Etherscan transaction collection.
+- Dataset generation across multiple data versions.
+- Token-aware feature engineering.
+- RandomForest / XGBoost / LightGBM model training.
+- Runtime rules for obvious high-risk behavior.
+- Lazy model loading at inference time.
+- Graph intelligence from wallet-to-wallet transaction networks.
+- FastAPI service endpoints.
+- Streamlit dashboard views.
+- WebSocket listener scaffolding for live token-transfer monitoring.
+
+===============================================================================
+2. HIGH-LEVEL DATA FLOW
+===============================================================================
+
+The current source-level flow is:
+
+1. main.py talks to Etherscan and wallet seed/pool files.
+2. main.py expands wallets and writes versioned CSV datasets.
+3. train_ml.py reads those CSV datasets and trains token-specific models.
+4. train_ml.py exports models, scalers, and feature lists as pickle files.
+5. wallet_check.py fetches wallet transactions at runtime.
+6. wallet_check.py detects the token and generates scoring features.
+7. wallet_check.py applies defensive rules before ML.
+8. wallet_check.py lazily loads the right token model when needed.
+9. wallet_check.py returns ALLOW, REVIEW, or BLOCK.
+10. api.py exposes this through HTTP endpoints.
+11. dashboard.py offers an operator-facing Streamlit surface.
+12. stream_listener.py can listen to provider WebSockets and pass events into
+    scoring handlers.
+13. graph_engine.py can enrich either dataset generation or runtime scoring
+    with network metrics.
+14. db.py optionally caches features and labels in Postgres.
+
+ASCII architecture:
+
+    Etherscan API
+        |
+        v
+    main.py ----------------------.
+        |                         |
+        v                         v
+    datasets/*.csv             graph_engine.py
+        |                         |
+        v                         |
+    train_ml.py                   |
+        |                         |
+        v                         |
+    models/*.pkl                  |
+        |                         |
+        v                         |
+    wallet_check.py <-------------'
+        |
+        +--> api.py
+        +--> dashboard.py
+        +--> stream_listener.py callback path
+
+===============================================================================
+3. TOKEN MODEL
+===============================================================================
+
+The codebase uses a two-tier token model.
+
+Trained tokens:
+
+- USDT
+- USDC
+- BUSD
+- DAI
+- USDP
+- TUSD
+
+These are the tokens expected to have full ML scoring artifacts:
+
+- models/<token>_model.pkl
+- models/<token>_scaler.pkl
+- models/<token>_features.pkl
+
+Watch-only tokens:
+
+- FRAX, USDX, GUSD, LUSD, MIM, USDD, EURS, DOLA, GOHM, USDCE, ALUSD, cUSDT
+- AAVE, COMP, SNX, UNI, LINK, SUSHI, CRV, 1INCH, YFI, MKR, BAL, AURA
+- WETH, MATIC, LDO, ARB, OP, GMX, SOL, MANTLE, LINEA
+- WBTC, cBTC, stETH, rswETH, CBETH, LST, cbRES, swETH
+- DOGE, SHIB, PEPE, FLOKI, BONK, WLD, SAFE
+- ETH
+
+Watch-only tokens are recognized for detection/reporting and rule fallback, but
+they do not have dedicated trained models in the current repository.
+
+Token type categories:
+
+- stablecoin
+- defi
+- native
+- wrapped
+- meme
+
+wallet_check.py and main.py both carry token classification maps. These maps
+let the system apply different thresholds and assumptions for different token
+classes.
+
+===============================================================================
+4. DATASET VERSIONING
+===============================================================================
+
+main.py defines a V0-V4 dataset lifecycle:
+
+V0 - broad baseline safe candidates
+    Intended to represent normal-looking wallets and broad background behavior.
+
+V1 - high-trust malicious
+    Seed-driven malicious or suspicious wallet expansion.
+
+V2 - scaled malicious
+    Larger malicious expansion from configured seeds or pools.
+
+V3 - poisoning behavior
+    Focuses on address poisoning and suspicious behavioral signatures.
+
+V4 - high-confidence safe
+    Filters safe candidates more strictly.
+
+The training pipeline then reads CSV files such as:
+
+- datasets/v0_<token>.csv
+- datasets/v1_<token>.csv
+- datasets/v2_<token>.csv
+- datasets/v3_<token>.csv
+- datasets/<token>_labeled_v4.csv
+- datasets/<token>_training_ready.csv
+
+The current clone does not include an active datasets/ folder in the file list,
+but it does include historical CSVs under "datasets deprecated/" and several
+small backup CSVs under backups/.
+
+===============================================================================
+5. RUNTIME DECISION FLOW
+===============================================================================
+
+wallet_check.py is the center of runtime inference.
+
+Main runtime steps:
+
+1. fetch_transactions(address, debug=False)
+   Calls Etherscan for a wallet address and returns transaction data.
+
+2. detect_token(transactions, manual_token=None, debug=False)
+   Uses a three-level strategy:
+   - manual token override when provided;
+   - tokenSymbol from transaction data;
+   - contractAddress mapped against known token contracts.
+
+3. generate_features(transactions, wallet_address=None)
+   Converts raw transactions into model/rule features.
+
+4. apply_rule_based_filters(...)
+   Applies defensive heuristics before ML. If a rule confidently decides, it
+   can return ALLOW, REVIEW, or BLOCK without model inference.
+
+5. load_model_for_token(token)
+   Loads a token model only when that token is being scored. This avoids loading
+   all model files during import/startup.
+
+6. score_wallet(address, manual_token=None, debug=False)
+   Orchestrates the full scoring lifecycle and returns a dictionary-like result.
+
+Output fields used by api.py include:
+
+- wallet
+- token
+- score
+- decision
+- reason
+- prob_normal
+- prob_malicious
+- prob_poisoned
+- confidence
+- graph_degree
+- graph_pagerank
+- connected_to_malicious
+- features_extracted
+- timestamp
+- processing_time_ms
+
+===============================================================================
+6. FILE-BY-FILE ECOSYSTEM
+===============================================================================
+
+README.md
+    Compact public-facing project overview. It now describes the current Python
+    ecosystem instead of keeping the older duplicated long-form README content.
+    It links to technical.txt for deeper explanation.
+
+technical.txt
+    This file. Long-form source map, lifecycle explanation, and caveat register.
+
+index.html
+    Lightweight static localhost overview. It is not the production scoring UI.
+    It is a browser-friendly project landing page that can be served with:
+        python -m http.server 8080
+
+.gitignore
+    Ignores Python cache files, virtualenvs, generated CSVs, pickle models,
+    IDE files, OS files, and .env files. Important caveat: some CSV and pickle
+    artifacts are already tracked in the repository despite these ignore rules.
+
+.env
+    Currently present in the clone. This should never be committed in a secure
+    production repository. It is mentioned here because the source currently
+    contains it, not because it should remain tracked.
+
+requirements.txt
+    Minimal dependency list:
+    - pandas
+    - numpy
+    - requests
+    - beautifulsoup4
+    - scikit-learn
+    - psycopg2-binary
+    - python-dotenv
+    - xgboost
+    - lightgbm
+
+    Missing for all optional/current modules:
+    - fastapi and uvicorn for api.py
+    - pydantic for API request/response models
+    - streamlit and plotly for dashboard.py
+    - networkx for graph_engine.py/dashboard graph work
+    - websockets and aiohttp for stream_listener.py
+    - tensorflow/torch/torch-geometric for optional deep/GNN modules
+    - shap for optional explainability in wallet_check.py
+
+main.py
+    Core dataset-generation engine. It owns:
+    - Etherscan configuration.
+    - API key selection by version.
+    - command-line parsing for --version and --mode.
+    - token lists and token type classification.
+    - wallet seed lists.
+    - pool-file paths for public address dataset/.
+    - V0-V4 enable flags and config.
+    - transaction fetching.
+    - wallet expansion.
+    - base, graph, and advanced feature computation.
+    - fraud keyword analysis.
+    - transaction pattern analysis.
+    - V0/V1/V2/V3/V4 dataset functions.
+    - dual/expand/extract pipeline execution modes.
+
+    Key functions:
+    - get_api_key
+    - parse_args
+    - load_pool
+    - get_unique_path
+    - save_pool
+    - get_config_for_version
+    - get_use_pool_for_version
+    - run_version_pipeline
+    - run_parallel_versions
+    - fetch_txs
+    - expand_wallets
+    - compute_base_features
+    - compute_graph_features
+    - compute_advanced_features
+    - analyze_text_for_fraud
+    - check_wallet_keywords
+    - analyze_transaction_patterns
+    - calculate_fraud_score
+    - compute_v3_features
+    - is_v0_safe_candidate
+    - is_v4_high_confidence_candidate
+    - run_v0, run_v1, run_v2, run_v3, run_v4
+    - extract_features_for_version
+    - generate_v4_dataset
+    - generate_v0_training_ready
+
+    Connections:
+    - Reads/writes public address dataset/ wallet pools.
+    - Writes datasets/ CSVs when generation runs.
+    - Imports graph_engine.TransactionGraph when available.
+    - Produces input data for train_ml.py.
+
+train_ml.py
+    Training pipeline for token-specific models.
+
+    Key responsibilities:
+    - Load token datasets.
+    - Normalize selected transaction-value fields.
+    - Define ALL_FEATURES expected by models.
+    - Apply token-specific class weights and threat profiles.
+    - Train RandomForest, XGBoost, and LightGBM candidates.
+    - Pick the best model by validation F1.
+    - Save the winning model, scaler, and feature column list.
+
+    Key functions:
+    - load_dataset
+    - load_dataset_with_info
+    - train_token_model
+
+    Connections:
+    - Reads datasets/*.csv.
+    - Writes models/*.pkl.
+    - Its exported scaler/features are consumed by wallet_check.py.
+
+    Current technical caveat:
+    - The file currently uses StandardScaler.fit_transform before splitting.
+    - It also performs resampling before validation splitting.
+    - This can leak validation information into training and inflate metrics.
+
+wallet_check.py
+    Runtime scoring engine. It is the most important operational file.
+
+    Key responsibilities:
+    - Fetch wallet transactions.
+    - Detect supported token.
+    - Generate runtime features.
+    - Check DB cache through db.py.
+    - Apply token-specific thresholds and rules.
+    - Load ML model/scaler/features lazily from models/.
+    - Return final ALLOW/REVIEW/BLOCK decision.
+
+    Key functions:
+    - load_model_for_token
+    - apply_rule_based_filters
+    - fetch_transactions
+    - detect_token
+    - generate_features
+    - score_wallet
+
+    Connections:
+    - Imports get_features and save_features from db.py.
+    - Optionally imports TransactionGraph from graph_engine.py.
+    - Reads model artifacts from models/.
+    - Called by api.py.
+    - Intended to be callable by stream_listener.py handlers.
+
+api.py
+    FastAPI service layer.
+
+    Declared endpoints:
+    - GET /health
+    - GET /model_info
+    - POST /score_wallet
+    - POST /batch_score
+
+    Data models:
+    - WalletScoringRequest
+    - WalletScoringResponse
+    - BatchScoringRequest
+    - BatchScoringResponse
+    - HealthResponse
+    - ModelInfoResponse
+
+    Connections:
+    - Imports score_wallet, fetch_transactions, detect_token, and
+      generate_features from wallet_check.py.
+    - Imports graph classes in health checks.
+    - Can be run directly with python api.py.
+    - Exposes Swagger docs at /docs when uvicorn/FastAPI dependencies exist.
+
+dashboard.py
+    Streamlit dashboard.
+
+    Current views:
+    - Overview
+    - Wallet Scorer
+    - Analytics
+    - Network Graph
+    - System Status
+
+    Connections:
+    - Intended operator UI for scoring and visualization.
+    - Uses pandas, numpy, plotly, streamlit, and optional networkx.
+    - Some displayed metrics are generated/demo values, so treat it as an
+      operational visualization shell rather than verified live production
+      telemetry.
+
+db.py
+    Postgres feature/label cache.
+
+    Key functions:
+    - get_features(wallet, token)
+    - save_features(wallet, token, f)
+    - get_label(wallet)
+    - save_label(wallet, label, trusted)
+
+    Connections:
+    - Loads .env through python-dotenv.
+    - Reads DATABASE_URL.
+    - Used by wallet_check.py to avoid recomputing features.
+
+    Current caveat:
+    - The file has unusual CR/LF artifacts in the raw output. Normalizing line
+      endings would make future reviews and patches cleaner.
+
+graph_engine.py
+    Network intelligence module built on NetworkX.
+
+    Main class:
+    - TransactionGraph
+
+    Key methods:
+    - add_transaction
+    - build_from_transactions
+    - add_known_malicious
+    - get_node_degree
+    - get_pagerank
+    - get_clustering_coefficient
+    - get_betweenness_centrality
+    - get_closeness_centrality
+    - get_unique_counterparties
+    - get_connected_components
+    - get_strongly_connected_components
+    - detect_suspicious_clusters
+    - find_paths_to_malicious
+    - get_total_inflow
+    - get_total_outflow
+    - get_transaction_flow_ratio
+    - extract_features
+    - get_statistics
+
+    Top-level helper:
+    - create_graph_from_wallet_transactions
+
+    Connections:
+    - Imported by main.py for graph features.
+    - Imported by wallet_check.py for runtime graph enrichment.
+    - Imported by api.py health check.
+
+gnn_model.py
+    Optional graph neural network experiment module.
+
+    Main classes:
+    - GCNFraudDetector
+    - GATFraudDetector
+    - GraphSAGEFraudDetector
+    - WalletNetworkGNN
+    - EnsembleGNNs
+
+    Connections:
+    - Conceptually extends graph_engine.py with trainable neural graph models.
+    - Depends on torch and torch-geometric.
+
+    Current caveat:
+    - The module conditionally imports torch/nn but defines classes inheriting
+      from nn.Module at module scope. On an environment without torch, importing
+      this file can fail before graceful fallback logic can help.
+
+deep_model.py
+    Optional sequence-model experiment module.
+
+    Main classes:
+    - LSTMFraudDetector
+    - TransformerFraudDetector
+    - EnsembleDeepModels
+
+    Top-level helper:
+    - create_feature_sequences
+
+    Connections:
+    - Uses TensorFlow/Keras when available.
+    - Optionally imports torch.
+    - Intended to model temporal transaction behavior beyond tabular features.
+
+stream_listener.py
+    Real-time WebSocket monitoring module.
+
+    Main classes:
+    - StreamListener
+    - StreamEventHandler
+
+    Key methods:
+    - listen
+    - _subscribe_to_token
+    - _process_message
+    - _parse_log
+    - _score_and_handle
+    - _score_transaction
+    - stop
+    - get_stats
+    - print_stats
+
+    Top-level function:
+    - run_stream_listener
+
+    Connections:
+    - Designed for Alchemy/Infura WebSocket URLs.
+    - Watches ERC-20 Transfer logs for core token contracts.
+    - Has callback hooks that can route scored transactions into alerting.
+
+    Current caveat:
+    - _score_transaction is a placeholder simulation rather than a full direct
+      call into wallet_check.py.
+    - Default provider URL contains YOUR-API-KEY placeholder.
+
+scan_and_report.py
+    Small inventory utility for scanning dataset/model availability.
+
+model_tester.py
+    Basic sanity script for checking model loading and simple behavior.
+
+test_contract_skip.py
+    Test file focused on skipping known token contract addresses.
+
+test_decision_fix.py
+    Test file focused on final decision behavior and threshold fixes.
+
+test_feature_fix.py
+    Test file focused on generated feature correctness.
+
+test_rules.py
+    Test file focused on rule-based filtering.
+
+test_token_detect.py
+    Test file focused on token detection behavior.
+
+test_token_expansion.py
+    Test file focused on expanded token coverage.
+
+test_token_integration.py
+    Test file focused on token integration across modules.
+
+test_wallet_check_fix.py
+    Test file focused on wallet_check.py fixes.
+
+CRITICAL_FIX_SUMMARY.md
+    Historical fix summary for the token detection flaw.
+    Useful details:
+    - Problem: tokenSymbol could be empty or unreliable.
+    - Fix: multi-level detection using manual override, tokenSymbol, and
+      contractAddress.
+    - Includes usage examples and troubleshooting.
+
+TOKEN_DETECTION_FIX.md
+    Detailed explanation of the same token detection issue and fix. This file
+    is more diagnostic and includes before/after architecture notes.
+
+WALLET_CHECK_USAGE_GUIDE.md
+    Usage guide for wallet_check.py. Includes CLI examples, programmatic use,
+    debug workflows, supported tokens, and troubleshooting.
+
+TOKEN_EXPANSION_README.md
+    Historical implementation note for expanding token support to the current
+    trained/watch-only model.
+
+TOKEN_SPECIFIC_RULES.md
+    Explains token-specific training configuration, scoring rules, and why
+    different assets need different thresholds.
+
+MULTI_TOKEN_IMPLEMENTATION.md
+    Historical implementation summary of multi-token dataset generation and
+    wallet_check.py lazy model loading.
+
+MULTI_TOKEN_SETUP_COMPLETE.md
+    Completion report for multi-token support. Summarizes confirmed/fixed
+    pieces, architecture, verification checklist, and next steps.
+
+pipeline.txt
+    Short root-level pipeline note. It overlaps with README/technical content
+    and should eventually be moved into docs/ or removed after consolidation.
+
+structure.txt
+    Short root-level structure note.
+
+structure copy.txt
+    Duplicate or near-duplicate of structure.txt.
+
+v4_wallet_pool.csv
+    Root-level CSV wallet pool for V4 high-confidence safe collection.
+
+wallet_pool.csv
+    Root-level CSV wallet pool used by expansion/generation workflows.
+
+===============================================================================
+7. FOLDERS AND GENERATED ARTIFACTS
+===============================================================================
+
+backup models/
+    Contains older pickle artifacts:
+    - usdc_features.pkl
+    - usdc_model.pkl
+    - usdc_scaler.pkl
+    - usdt_features.pkl
+    - usdt_model.pkl
+    - usdt_scaler.pkl
+
+    These files are large generated model artifacts and are already tracked.
+    Future cleanup should move generated models out of Git or use release
+    artifacts/object storage.
+
+backups/
+    Contains small CSV snapshots:
+    - eth_datasets.csv_1.csv
+    - usdc_datasets.csv_1.csv
+    - usdt_datasets.csv_1.csv
+    - usdt_datasets.csv_2.csv
+
+batch_scan/
+    Contains:
+    - wallets.csv
+
+    Used as a small batch input set.
+
+datasets deprecated/
+    Historical generated datasets. These are not active source code, but they
+    preserve earlier generated data:
+    - busd_labeled_v3.csv
+    - busd_labeled_v4.csv
+    - busd_training_ready.csv
+    - dai_labeled_v3.csv
+    - dai_labeled_v4.csv
+    - dai_training_ready.csv
+    - tusd_labeled_v3.csv
+    - tusd_labeled_v4.csv
+    - tusd_training_ready.csv
+    - usdc_labeled_auto.csv
+    - usdc_labeled_v3.csv
+    - usdc_labeled_v4.csv
+    - usdc_training_ready.csv
+    - usdp_labeled_v3.csv
+    - usdp_labeled_v4.csv
+    - usdp_training_ready.csv
+    - usdt_datasets.csv
+    - usdt_labeled_auto.csv
+    - usdt_labeled_v3.csv
+    - usdt_labeled_v4.csv
+    - usdt_training_ready.csv
+    - v0_busd.csv
+    - v0_dai.csv
+    - v0_tusd.csv
+    - v0_usdc.csv
+    - v0_usdp.csv
+    - v0_usdt.csv
+    - v1_busd.csv
+    - v1_dai.csv
+    - v1_tusd.csv
+    - v1_usdc.csv
+    - v1_usdp.csv
+    - v1_usdt.csv
+    - v3_busd.csv
+    - v3_clean_busd.csv
+    - v3_clean_dai.csv
+    - v3_clean_tusd.csv
+    - v3_clean_usdc.csv
+    - v3_clean_usdp.csv
+    - v3_clean_usdt.csv
+    - v3_dai.csv
+    - v3_raw_busd.csv
+    - v3_raw_dai.csv
+    - v3_raw_tusd.csv
+    - v3_raw_usdc.csv
+    - v3_raw_usdp.csv
+    - v3_raw_usdt.csv
+    - v3_tusd.csv
+    - v3_usdc.csv
+    - v3_usdp.csv
+    - v3_usdt.csv
+    - v4_busd.csv
+    - v4_dai.csv
+    - v4_tusd.csv
+    - v4_usdc.csv
+    - v4_usdp.csv
+    - v4_usdt.csv
+
+public address dataset/
+    Contains .gitkeep in this clone. main.py expects versioned wallet pool CSVs
+    here when USE_POOL_V* flags are enabled.
+
+.git/
+    Git metadata. Not part of runtime behavior.
+
+===============================================================================
+8. API ECOSYSTEM
+===============================================================================
+
+api.py defines the current backend surface.
+
+GET /health
+    Returns:
+    - status
+    - timestamp
+    - supported_tokens
+    - trained_tokens
+    - graph_engine_available
+
+GET /model_info
+    Returns:
+    - trained_tokens
+    - supported_all_tokens
+    - graph_features_available
+    - api_version
+    - system_description
+
+POST /score_wallet
+    Request:
+    - address
+    - manual_token
+    - debug
+
+    Response:
+    - wallet, token, score, decision, reason
+    - probabilities
+    - confidence
+    - graph fields
+    - feature extraction status
+    - timestamp
+    - processing time
+
+POST /batch_score
+    Request:
+    - addresses
+    - max_parallel
+
+    Response:
+    - total_requested
+    - total_scored
+    - results
+    - batch_time_ms
+
+===============================================================================
+9. TRAINING ECOSYSTEM
+===============================================================================
+
+train_ml.py uses the following concept:
+
+For each token:
+    1. Load available datasets.
+    2. Merge safe, malicious, poisoned, and unknown rows.
+    3. Build feature matrix using ALL_FEATURES.
+    4. Scale features with StandardScaler.
+    5. Oversample risk classes.
+    6. Split into train/validation.
+    7. Train one or more models.
+    8. Evaluate with F1 score.
+    9. Save best model artifacts.
+
+Model choices:
+    - rf
+    - xgb
+    - lgb
+    - auto
+
+Artifacts:
+    - models/<token>_model.pkl
+    - models/<token>_model_<best_name>.pkl
+    - models/<token>_scaler.pkl
+    - models/<token>_features.pkl
+
+Important methodology note:
+    Validation metrics generated by this current code should be treated as
+    development signals, not audited production performance. The pipeline should
+    be refactored to split first, then fit scalers and resamplers only on the
+    training fold.
+
+===============================================================================
+10. GRAPH ECOSYSTEM
+===============================================================================
+
+graph_engine.py can convert transactions into a graph where:
+
+- nodes are wallets;
+- edges are wallet-to-wallet transfers;
+- edge weight is cumulative value;
+- edge frequency is transaction count.
+
+Graph features can include:
+
+- node degree;
+- PageRank;
+- clustering coefficient;
+- betweenness centrality;
+- closeness centrality;
+- unique inbound/outbound counterparties;
+- suspicious clusters;
+- path distance to known malicious wallets;
+- inflow/outflow values;
+- transaction flow ratio.
+
+These graph features can enrich:
+
+- dataset generation in main.py;
+- runtime scoring in wallet_check.py;
+- visualization in dashboard.py;
+- future network graph UI work.
+
+===============================================================================
+11. LOCALHOST SURFACES
+===============================================================================
+
+FastAPI API:
+    python api.py
+    http://localhost:8000/docs
+    http://localhost:8000/health
+
+Static overview:
+    python -m http.server 8080
+    http://localhost:8080/
+
+Streamlit dashboard:
+    streamlit run dashboard.py
+
+The static overview is documentation-only. The API and Streamlit dashboard are
+the current functional localhost surfaces.
+
+===============================================================================
+12. SECURITY AND PRODUCTION CAVEATS
+===============================================================================
+
+This section is explicit because this repository touches payout security.
+
+Hardcoded keys:
+    main.py and wallet_check.py currently contain hardcoded Etherscan API keys.
+    These should be moved to environment variables and rotated before any real
+    production use.
+
+Tracked .env:
+    .env exists in the clone. It should be removed from tracking and replaced by
+    .env.example with placeholders.
+
+Generated artifacts:
+    CSV and pickle artifacts are tracked despite .gitignore rules. This can make
+    repository history large and can leak sensitive data if datasets contain
+    private labels or proprietary wallet sets.
+
+Dependency completeness:
+    requirements.txt is not enough for all modules to run. The API/dashboard/
+    stream/deep/GNN modules need extra dependencies.
+
+Metrics:
+    Any accuracy/F1/recall claims should be regenerated with a leakage-free
+    train/validation/test process before being used in production documents.
+
+===============================================================================
+13. RECOMMENDED NEXT ENGINEERING PASS
+===============================================================================
+
+1. Move every API key to environment variables.
+2. Remove .env from tracking and rotate exposed keys.
+3. Add .env.example with placeholders.
+4. Normalize db.py line endings.
+5. Expand requirements.txt or split into base/api/dashboard/dev/optional extras.
+6. Make gnn_model.py import-safe without torch installed.
+7. Refactor train_ml.py to avoid leakage.
+8. Add tests under tests/.
+9. Add CI for lint, tests, dependency import checks, and secret scanning.
+10. Decide whether Streamlit remains the ops dashboard or whether a React
+    security console should replace it.
+
+===============================================================================
+14. SHORT MENTAL MODEL
+===============================================================================
+
+Think of the system as five connected machines:
+
+1. Collector:
+    main.py gathers and expands wallet data.
+
+2. Trainer:
+    train_ml.py turns datasets into token models.
+
+3. Scorer:
+    wallet_check.py turns one wallet into one decision.
+
+4. Server:
+    api.py turns scorer logic into HTTP endpoints.
+
+5. Operator surfaces:
+    dashboard.py, stream_listener.py, and index.html help humans view or operate
+    the system locally.
+
+Everything else either stores data, stores models, documents historical fixes,
+or tests one part of those machines.

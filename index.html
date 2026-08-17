@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stablecoin Risk Scoring System</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #070b12;
+        --panel: rgba(16, 24, 39, 0.78);
+        --line: rgba(125, 211, 252, 0.26);
+        --text: #eef6ff;
+        --muted: #9fb4ca;
+        --cyan: #22d3ee;
+        --green: #34d399;
+        --amber: #f59e0b;
+        --red: #fb7185;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background:
+          radial-gradient(circle at 20% 15%, rgba(34, 211, 238, 0.22), transparent 30rem),
+          radial-gradient(circle at 80% 10%, rgba(251, 113, 133, 0.14), transparent 28rem),
+          linear-gradient(180deg, #070b12 0%, #0b1220 100%);
+        color: var(--text);
+        min-height: 100vh;
+      }
+      main { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0; }
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+        gap: 24px;
+        align-items: stretch;
+      }
+      .eyebrow { color: var(--cyan); text-transform: uppercase; letter-spacing: .18em; font-size: 12px; font-weight: 800; }
+      h1 { font-size: clamp(36px, 7vw, 78px); line-height: .92; margin: 18px 0; max-width: 900px; }
+      p { color: var(--muted); font-size: 16px; line-height: 1.65; }
+      .panel {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, .34);
+        border-radius: 16px;
+        padding: 22px;
+        backdrop-filter: blur(18px);
+      }
+      .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+      a.button {
+        color: var(--text);
+        border: 1px solid var(--line);
+        text-decoration: none;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: rgba(15, 23, 42, .8);
+        font-weight: 700;
+      }
+      a.button.primary { border-color: rgba(34, 211, 238, .65); background: rgba(8, 145, 178, .22); }
+      .ticker { display: grid; gap: 12px; }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        padding: 12px;
+        border: 1px solid rgba(148, 163, 184, .16);
+        border-radius: 12px;
+        background: rgba(2, 6, 23, .36);
+        font-family: "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
+      }
+      .allow { color: var(--green); }
+      .review { color: var(--amber); }
+      .block { color: var(--red); }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 24px;
+      }
+      .metric strong { display: block; font-size: 28px; margin-bottom: 6px; }
+      .metric span { color: var(--muted); font-size: 13px; }
+      .flow { margin-top: 24px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+      .step { border: 1px solid rgba(148, 163, 184, .18); padding: 14px; border-radius: 12px; background: rgba(15, 23, 42, .62); }
+      .step b { display: block; margin-bottom: 6px; color: var(--cyan); }
+      footer { margin-top: 36px; color: var(--muted); font-size: 14px; }
+      @media (max-width: 900px) {
+        .hero, .grid, .flow { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div class="panel">
+          <div class="eyebrow">Blockchain payout intelligence</div>
+          <h1>Real-time stablecoin wallet risk scoring.</h1>
+          <p>
+            A Python ecosystem for Etherscan-backed dataset generation, token-aware
+            ML training, graph intelligence, FastAPI scoring, and local operator views.
+          </p>
+          <div class="actions">
+            <a class="button primary" href="./README.md">Open README</a>
+            <a class="button" href="./technical.txt">Open technical.txt</a>
+            <a class="button" href="http://localhost:8000/docs">FastAPI docs</a>
+          </div>
+        </div>
+        <div class="panel ticker" aria-label="Sample live decision feed">
+          <div class="row"><span>0x8f3a...91bc / USDT</span><strong class="allow">ALLOW</strong></div>
+          <div class="row"><span>0xa229...71dd / USDC</span><strong class="review">REVIEW</strong></div>
+          <div class="row"><span>0x44b1...b8fe / DAI</span><strong class="block">BLOCK</strong></div>
+          <div class="row"><span>0xe120...08af / TUSD</span><strong class="allow">ALLOW</strong></div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="panel metric"><strong>54</strong><span>recognized tokens</span></div>
+        <div class="panel metric"><strong>6</strong><span>trained stablecoin models</span></div>
+        <div class="panel metric"><strong>V0-V4</strong><span>dataset generation lifecycle</span></div>
+        <div class="panel metric"><strong>3</strong><span>decisions: allow, review, block</span></div>
+      </section>
+
+      <section class="panel flow" aria-label="System flow">
+        <div class="step"><b>Collect</b><span>Etherscan wallet transactions</span></div>
+        <div class="step"><b>Build</b><span>Versioned CSV datasets</span></div>
+        <div class="step"><b>Train</b><span>RF, XGBoost, LightGBM</span></div>
+        <div class="step"><b>Score</b><span>Rules plus ML inference</span></div>
+        <div class="step"><b>Serve</b><span>FastAPI and dashboard views</span></div>
+      </section>
+
+      <footer>
+        Credit: John Marwin Ebona. Serve locally with <code>python -m http.server 8080</code>.
+      </footer>
+    </main>
+  </body>
+</html>
