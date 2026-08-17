@@ -146,7 +146,7 @@ if mode == "📊 Overview":
         return 'background-color: #ccffcc'  # Low
     
     st.dataframe(
-        risky_data.style.applymap(color_risk, subset=['Risk Score']),
+        risky_data.style.map(color_risk, subset=['Risk Score']),
         use_container_width=True
     )
     

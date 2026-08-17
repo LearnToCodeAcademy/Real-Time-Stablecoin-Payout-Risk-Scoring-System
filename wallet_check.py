@@ -34,7 +34,7 @@ except ImportError:
 
 # =============================
 
-API_KEY = "HVJKPIBXH53KSZFNTWI9RTEN6EXT9UXK7R"
+API_KEY = os.getenv("ETHERSCAN_API_KEY") or os.getenv("ETHERSCAN_API_KEY_V0", "")
 
 BASE_URL = "https://api.etherscan.io/api"
 

@@ -8,6 +8,8 @@ Uses PyTorch Geometric for GNN implementation:
 - GraphSAGE: Sampling and aggregating neighborhoods
 """
 
+from __future__ import annotations
+
 import numpy as np
 import logging
 from typing import Dict, List, Tuple, Optional, Any
@@ -23,6 +25,16 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
+    torch = None
+    F = None
+
+    class _MissingTorchModule:
+        pass
+
+    class _MissingNN:
+        Module = _MissingTorchModule
+
+    nn = _MissingNN()
     logger.warning("PyTorch not installed. Install with: pip install torch")
 
 try:
@@ -33,6 +45,13 @@ try:
 except ImportError:
     HAS_TORCH_GEOMETRIC = False
     logger.warning("PyTorch Geometric not installed. Install with: pip install torch-geometric")
+
+
+def _empty_node_scores(x):
+    size = x.shape[0] if hasattr(x, "shape") else 0
+    if HAS_TORCH:
+        return torch.zeros(size)
+    return np.zeros(size)
 
 
 class GCNFraudDetector(nn.Module):
@@ -76,7 +95,7 @@ class GCNFraudDetector(nn.Module):
             Node fraud scores
         """
         if not HAS_TORCH_GEOMETRIC:
-            return torch.zeros(x.shape[0])
+            return _empty_node_scores(x)
         
         # Graph convolution layers with ReLU activation
         x = self.conv1(x, edge_index)
@@ -127,7 +146,7 @@ class GATFraudDetector(nn.Module):
     def forward(self, x, edge_index):
         """Forward pass with attention mechanism"""
         if not HAS_TORCH_GEOMETRIC:
-            return torch.zeros(x.shape[0])
+            return _empty_node_scores(x)
         
         # First attention layer
         x = self.att1(x, edge_index)
@@ -165,7 +184,7 @@ class GraphSAGEFraudDetector(nn.Module):
     def forward(self, x, edge_index):
         """Forward pass"""
         if not HAS_TORCH_GEOMETRIC:
-            return torch.zeros(x.shape[0])
+            return _empty_node_scores(x)
         
         x = self.sage1(x, edge_index)
         x = F.relu(x)

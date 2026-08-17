@@ -7,3 +7,13 @@ psycopg2-binary
 python-dotenv
 xgboost
 lightgbm
+fastapi
+uvicorn
+pydantic
+streamlit
+plotly
+networkx
+websockets
+aiohttp
+python-json-logger
+prometheus-client

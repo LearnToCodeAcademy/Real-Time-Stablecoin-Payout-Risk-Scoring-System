@@ -16,15 +16,15 @@ try:
 except ImportError:
     TransactionGraph = None
 
-API_KEY = "HP8KE56GFDIDIUCEGPAI9T5DCDYWIPYW4K"
+API_KEY = os.getenv("ETHERSCAN_API_KEY") or os.getenv("ETHERSCAN_API_KEY_V0", "")
 BASE_URL = "https://api.etherscan.io/v2/api"
 
 VERSION_API_KEYS = {
-    "v0": "HP8KE56GFDIDIUCEGPAI9T5DCDYWIPYW4K",
-    "v1": "HVJKPIBXH53KSZFNTWI9RTEN6EXT9UXK7R",
-    "v2": "X3A2JP555Z4N1DYYYE4V8VFSUN9PZCGEUF",
-    "v3": "QKB9WBBC6NYK1CCS3MGW6Q226A1WUSJ4KR",
-    "v4": "HP8KE56GFDIDIUCEGPAI9T5DCDYWIPYW4K"
+    "v0": os.getenv("ETHERSCAN_API_KEY_V0") or API_KEY,
+    "v1": os.getenv("ETHERSCAN_API_KEY_V1") or API_KEY,
+    "v2": os.getenv("ETHERSCAN_API_KEY_V2") or API_KEY,
+    "v3": os.getenv("ETHERSCAN_API_KEY_V3") or API_KEY,
+    "v4": os.getenv("ETHERSCAN_API_KEY_V4") or API_KEY,
 }
 
 def get_api_key(version):

@@ -29,3 +29,7 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Local training runtime artifacts
+training_runs.json
+model_versions/

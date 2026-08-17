@@ -9,13 +9,24 @@ Endpoints:
 - GET /get_model_info - Get model/token information
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import time
 import logging
 from datetime import datetime
+import json
+import os
+from pathlib import Path
+import asyncio
+import random
+import re
+import shutil
+import subprocess
+import sys
+import uuid
 
 # Import wallet scoring functions
 from wallet_check import score_wallet, fetch_transactions, detect_token, generate_features
@@ -83,12 +94,44 @@ class ModelInfoResponse(BaseModel):
     system_description: str
 
 
+class TrainingRequest(BaseModel):
+    """Request model for local-only model training"""
+    token: str = Field("all", description="Token to train, or 'all'")
+    model: str = Field("auto", description="Model choice: auto, rf, xgb, or lgb")
+
+
+class TrainingRunResponse(BaseModel):
+    """Response model for local training runs"""
+    run_id: str
+    status: str
+    token: str
+    model: str
+    started_at: str
+    finished_at: Optional[str] = None
+    best_f1_macro: Optional[float] = None
+    rollback_available: bool = False
+    message: str
+
+
 # ============ FASTAPI APP ============
 
 app = FastAPI(
     title="Real-Time Stablecoin Risk Scoring API",
     description="Enterprise fraud detection and risk scoring for blockchain wallets",
     version="2.0"
+)
+
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080").split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Global stats
@@ -98,6 +141,96 @@ API_STATS = {
     "total_time": 0.0,
     "start_time": datetime.now()
 }
+
+TRAINING_HISTORY_PATH = Path("training_runs.json")
+MODEL_DIR = Path("models")
+MODEL_VERSION_DIR = Path("model_versions")
+TRAINABLE_TOKENS = {"all", "usdt", "usdc", "busd", "dai", "usdp", "tusd"}
+TRAINABLE_MODELS = {"auto", "rf", "xgb", "lgb"}
+
+
+def _local_training_enabled() -> bool:
+    enabled = os.getenv("ENABLE_LOCAL_TRAINING", "").lower() in {"1", "true", "yes", "on"}
+    static_host = os.getenv("NETLIFY", "").lower() in {"1", "true"}
+    return enabled and not static_host
+
+
+def _require_local_training():
+    if not _local_training_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="Local training is disabled. Set ENABLE_LOCAL_TRAINING=true on a local/standalone API server."
+        )
+
+
+def _load_training_history() -> List[Dict[str, Any]]:
+    if not TRAINING_HISTORY_PATH.exists():
+        return []
+    try:
+        return json.loads(TRAINING_HISTORY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("Training history is unreadable; starting with an empty history view")
+        return []
+
+
+def _save_training_history(history: List[Dict[str, Any]]):
+    TRAINING_HISTORY_PATH.write_text(json.dumps(history, indent=2), encoding="utf-8")
+
+
+def _upsert_training_run(record: Dict[str, Any]):
+    history = _load_training_history()
+    history = [item for item in history if item.get("run_id") != record.get("run_id")]
+    history.insert(0, record)
+    _save_training_history(history[:50])
+
+
+def _snapshot_models(run_id: str) -> bool:
+    if not MODEL_DIR.exists():
+        return False
+    MODEL_VERSION_DIR.mkdir(exist_ok=True)
+    destination = MODEL_VERSION_DIR / run_id
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.copytree(MODEL_DIR, destination)
+    return True
+
+
+def _extract_best_f1(output: str) -> Optional[float]:
+    matches = re.findall(r"F1 \(macro\):\s*([0-9.]+)", output)
+    if not matches:
+        return None
+    return max(float(value) for value in matches)
+
+
+def _run_training_job(run_id: str, token: str, model: str):
+    record = {
+        "run_id": run_id,
+        "status": "running",
+        "token": token,
+        "model": model,
+        "started_at": datetime.now().isoformat(),
+        "finished_at": None,
+        "best_f1_macro": None,
+        "rollback_available": False,
+        "message": "Training started",
+    }
+    _upsert_training_run(record)
+
+    try:
+        record["rollback_available"] = _snapshot_models(run_id)
+        command = [sys.executable, "train_ml.py", "--token", token, "--model", model]
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=None)
+        combined_output = f"{completed.stdout}\n{completed.stderr}"
+        record["best_f1_macro"] = _extract_best_f1(combined_output)
+        record["finished_at"] = datetime.now().isoformat()
+        record["status"] = "success" if completed.returncode == 0 else "failed"
+        record["message"] = combined_output[-4000:] if combined_output.strip() else "Training finished with no output"
+    except Exception as exc:
+        record["finished_at"] = datetime.now().isoformat()
+        record["status"] = "failed"
+        record["message"] = str(exc)
+
+    _upsert_training_run(record)
 
 
 # ============ ENDPOINTS ============
@@ -138,6 +271,111 @@ def get_model_info():
         api_version="2.0",
         system_description="Enterprise fraud detection with graph intelligence, stripe-grade keyword analysis, and behavioral pattern detection"
     )
+
+
+@app.get("/training/history", response_model=List[TrainingRunResponse], tags=["Training"])
+def get_training_history():
+    """Return local training history. Training itself is disabled unless explicitly enabled."""
+    return _load_training_history()
+
+
+@app.post("/training/train", response_model=TrainingRunResponse, tags=["Training"])
+def start_training(request: TrainingRequest, background_tasks: BackgroundTasks):
+    """
+    Start a local-only training run.
+
+    This endpoint is intentionally gated by ENABLE_LOCAL_TRAINING=true and is
+    meant for standalone/local operation only. Static hosts such as Netlify
+    should use the checker UI and leave training disabled.
+    """
+    _require_local_training()
+    token = request.token.lower().strip()
+    model = request.model.lower().strip()
+
+    if token not in TRAINABLE_TOKENS:
+        raise HTTPException(status_code=400, detail=f"Unsupported training token: {request.token}")
+    if model not in TRAINABLE_MODELS:
+        raise HTTPException(status_code=400, detail=f"Unsupported training model: {request.model}")
+
+    run_id = uuid.uuid4().hex[:12]
+    record = {
+        "run_id": run_id,
+        "status": "queued",
+        "token": token,
+        "model": model,
+        "started_at": datetime.now().isoformat(),
+        "finished_at": None,
+        "best_f1_macro": None,
+        "rollback_available": MODEL_DIR.exists(),
+        "message": "Training queued",
+    }
+    _upsert_training_run(record)
+    background_tasks.add_task(_run_training_job, run_id, token, model)
+    return record
+
+
+@app.get("/training/status/{run_id}", response_model=TrainingRunResponse, tags=["Training"])
+def get_training_status(run_id: str):
+    """Return one local training run by id."""
+    for record in _load_training_history():
+        if record.get("run_id") == run_id:
+            return record
+    raise HTTPException(status_code=404, detail="Training run not found")
+
+
+@app.post("/training/rollback/{run_id}", response_model=TrainingRunResponse, tags=["Training"])
+def rollback_training_run(run_id: str):
+    """Restore the model snapshot captured before a local training run."""
+    _require_local_training()
+    source = MODEL_VERSION_DIR / run_id
+    if not source.exists():
+        raise HTTPException(status_code=404, detail="No rollback snapshot found for this run")
+
+    if MODEL_DIR.exists():
+        shutil.rmtree(MODEL_DIR)
+    shutil.copytree(source, MODEL_DIR)
+
+    record = {
+        "run_id": f"rollback-{run_id}",
+        "status": "success",
+        "token": "rollback",
+        "model": "snapshot",
+        "started_at": datetime.now().isoformat(),
+        "finished_at": datetime.now().isoformat(),
+        "best_f1_macro": None,
+        "rollback_available": False,
+        "message": f"Restored model snapshot from run {run_id}",
+    }
+    _upsert_training_run(record)
+    return record
+
+
+@app.websocket("/ws/live-alerts")
+async def websocket_live_alerts(websocket: WebSocket):
+    """
+    Live alert stream for the static checker UI.
+
+    This currently emits a safe local heartbeat/sample stream. A production
+    deployment should bridge this endpoint to stream_listener.py with a real
+    Alchemy or Infura provider URL.
+    """
+    await websocket.accept()
+    tokens = ["USDT", "USDC", "DAI", "BUSD", "USDP", "TUSD"]
+    decisions = ["ALLOW", "REVIEW", "BLOCK"]
+    try:
+        while True:
+            decision = random.choices(decisions, weights=[78, 16, 6], k=1)[0]
+            await websocket.send_json({
+                "timestamp": datetime.now().isoformat(),
+                "wallet": f"0x{uuid.uuid4().hex[:40]}",
+                "token": random.choice(tokens),
+                "decision": decision,
+                "score": round(random.uniform(0.12, 0.98), 4),
+                "demo": True,
+            })
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        logger.info("Live alert websocket disconnected")
 
 
 @app.post("/score_wallet", response_model=WalletScoringResponse, tags=["Scoring"])

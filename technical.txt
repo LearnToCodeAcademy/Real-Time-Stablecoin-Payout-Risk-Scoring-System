@@ -223,6 +223,18 @@ index.html
     It is a browser-friendly project landing page that can be served with:
         python -m http.server 8080
 
+checker.html
+    Static wallet checker UI. It can run from localhost or a static host such as
+    Netlify when pointed at a reachable FastAPI backend. It does not call
+    Etherscan directly; it posts wallet lookups to /score_wallet and listens to
+    /ws/live-alerts for live feed events.
+
+training.html
+    Standalone/local training console. It calls the FastAPI /training endpoints
+    and is intentionally useless on static hosting unless a local backend has
+    ENABLE_LOCAL_TRAINING=true. It can start a training run, show history, and
+    request rollback to a pre-run model snapshot.
+
 .gitignore
     Ignores Python cache files, virtualenvs, generated CSVs, pickle models,
     IDE files, OS files, and .env files. Important caveat: some CSV and pickle
@@ -366,6 +378,11 @@ api.py
     - GET /model_info
     - POST /score_wallet
     - POST /batch_score
+    - GET /training/history
+    - POST /training/train
+    - GET /training/status/{run_id}
+    - POST /training/rollback/{run_id}
+    - WebSocket /ws/live-alerts
 
     Data models:
     - WalletScoringRequest
@@ -379,6 +396,8 @@ api.py
     - Imports score_wallet, fetch_transactions, detect_token, and
       generate_features from wallet_check.py.
     - Imports graph classes in health checks.
+    - Runs local training through train_ml.py only when ENABLE_LOCAL_TRAINING is
+      explicitly enabled.
     - Can be run directly with python api.py.
     - Exposes Swagger docs at /docs when uvicorn/FastAPI dependencies exist.
 
@@ -819,6 +838,8 @@ FastAPI API:
 Static overview:
     python -m http.server 8080
     http://localhost:8080/
+    http://localhost:8080/checker.html
+    http://localhost:8080/training.html
 
 Streamlit dashboard:
     streamlit run dashboard.py
@@ -833,9 +854,9 @@ the current functional localhost surfaces.
 This section is explicit because this repository touches payout security.
 
 Hardcoded keys:
-    main.py and wallet_check.py currently contain hardcoded Etherscan API keys.
-    These should be moved to environment variables and rotated before any real
-    production use.
+    main.py and wallet_check.py now load Etherscan API keys from environment
+    variables. Previously exposed keys still require rotation and Git history
+    scrubbing before real production use.
 
 Tracked .env:
     .env exists in the clone. It should be removed from tracking and replaced by
@@ -847,8 +868,9 @@ Generated artifacts:
     private labels or proprietary wallet sets.
 
 Dependency completeness:
-    requirements.txt is not enough for all modules to run. The API/dashboard/
-    stream/deep/GNN modules need extra dependencies.
+    requirements.txt now includes API, dashboard, graph, and stream runtime
+    dependencies. Deep-learning stacks remain optional and should be installed
+    deliberately when GNN/LSTM/Transformer work is needed.
 
 Metrics:
     Any accuracy/F1/recall claims should be regenerated with a leakage-free
@@ -859,12 +881,12 @@ Metrics:
 ===============================================================================
 
 1. Move every API key to environment variables.
-2. Remove .env from tracking and rotate exposed keys.
-3. Add .env.example with placeholders.
-4. Normalize db.py line endings.
-5. Expand requirements.txt or split into base/api/dashboard/dev/optional extras.
-6. Make gnn_model.py import-safe without torch installed.
-7. Refactor train_ml.py to avoid leakage.
+2. Rotate exposed keys and database credentials.
+3. Scrub leaked secrets from Git history.
+4. Split dependencies into base/api/dashboard/dev/optional extras.
+5. Add real stream_listener.py bridging behind /ws/live-alerts.
+6. Generate fresh model performance reports with the leakage-free training flow.
+7. Expand the checker UI into a full React/Vite console if desired.
 8. Add tests under tests/.
 9. Add CI for lint, tests, dependency import checks, and secret scanning.
 10. Decide whether Streamlit remains the ops dashboard or whether a React

@@ -21,8 +21,8 @@ Pre-transaction wallet intelligence for stablecoin and token payouts. The system
 | Runtime scoring | Scores wallets with rule-based checks first, then ML inference when a trained model exists. |
 | Graph intelligence | Builds wallet transaction graphs with degree, PageRank, centrality, clusters, and malicious-neighbor signals. |
 | API layer | Serves wallet scoring, batch scoring, model info, and health checks through FastAPI. |
-| Monitoring UI | Includes a Streamlit dashboard plus a static local landing page for quick localhost viewing. |
-| Live stream | Provides a WebSocket listener skeleton for Alchemy/Infura token-transfer monitoring. |
+| Web UI | Includes static `checker.html`, `training.html`, and `index.html` pages for local or static hosting. |
+| Live stream | Provides a WebSocket listener skeleton plus `/ws/live-alerts` for the checker UI. |
 
 ---
 
@@ -83,6 +83,8 @@ flowchart TD
 | `model_tester.py` | Simple model-load sanity script. |
 | `technical.txt` | Full ecosystem explanation, file-by-file connections, and current caveats. |
 | `index.html` | Static local project overview for browser preview. |
+| `checker.html` | Static wallet checker that can call a local or deployed FastAPI backend. |
+| `training.html` | Local-only training console for API-triggered training runs and rollbacks. |
 
 ---
 
@@ -112,7 +114,7 @@ Open:
 
 - API docs: `http://localhost:8000/docs`
 - Health check: `http://localhost:8000/health`
-- Static overview: run `python -m http.server 8080`, then open `http://localhost:8080/`
+- Static overview/checker/training: run `python -m http.server 8080`, then open `http://localhost:8080/`
 
 Score a wallet from Python:
 
@@ -146,11 +148,11 @@ Current runtime flow:
 
 ## Important Current Notes
 
-- The checked-in `requirements.txt` is minimal and does not include every optional module used by the API, dashboard, graph, stream, and deep-learning files.
+- Active Etherscan key configuration now reads from environment variables. Previously exposed keys still need rotation and Git history scrubbing.
 - Some historical data/model artifacts are committed even though `.gitignore` excludes generated CSV and pickle files.
-- `main.py` and `wallet_check.py` currently contain hardcoded Etherscan keys in the cloned source; rotate any exposed keys before production use.
-- `train_ml.py` currently scales and resamples before validation splitting, so any performance claims should be re-verified with a leakage-free pipeline.
-- `gnn_model.py` is optional and can fail on machines without PyTorch because its classes inherit from `nn.Module`.
+- `train_ml.py` now splits before fitting scalers and oversampling; performance claims still need fresh generated reports.
+- `gnn_model.py` is optional and imports safely without PyTorch, but GNN training still requires PyTorch and PyTorch Geometric.
+- Local training is disabled unless the API runs with `ENABLE_LOCAL_TRAINING=true`.
 
 See `technical.txt` for the detailed system ecosystem, exact file relationships, and remediation notes.
 
@@ -165,6 +167,11 @@ python -m http.server 8080
 ```
 
 Then visit `http://localhost:8080/`.
+
+Static pages:
+
+- Checker: `http://localhost:8080/checker.html`
+- Local training: `http://localhost:8080/training.html`
 
 ---
 

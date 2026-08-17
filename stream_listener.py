@@ -9,6 +9,7 @@ before blockchain confirmation for zero-latency fraud detection.
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Callable, Optional, Dict, Any, List
 import time
@@ -39,7 +40,7 @@ class StreamListener:
     """
     
     def __init__(self, 
-                 provider_url: str = "wss://eth-mainnet.g.alchemy.com/v2/YOUR-API-KEY",
+                 provider_url: Optional[str] = None,
                  token_contracts: Optional[Dict[str, str]] = None):
         """
         Initialize stream listener
@@ -48,7 +49,12 @@ class StreamListener:
             provider_url: WebSocket URL (Alchemy/Infura)
             token_contracts: Dict mapping token symbol to contract address
         """
-        self.provider_url = provider_url
+        self.provider_url = (
+            provider_url
+            or os.getenv("ALCHEMY_WS_URL")
+            or os.getenv("INFURA_WS_URL")
+            or ""
+        )
         self.token_contracts = token_contracts or self._get_default_contracts()
         self.is_running = False
         self.transaction_handlers: List[Callable] = []
@@ -85,6 +91,9 @@ class StreamListener:
         """
         if not HAS_WEBSOCKETS:
             logger.error("websockets library required. Install with: pip install websockets")
+            return
+        if not self.provider_url:
+            logger.error("Set ALCHEMY_WS_URL or INFURA_WS_URL before starting the stream listener")
             return
         
         self.is_running = True
@@ -287,9 +296,9 @@ async def run_stream_listener(provider_url: str = None):
         print("Install with: pip install websockets aiohttp")
         return
     
-    # Use provided URL or default (replace with your Alchemy API key)
+    # Use provided URL or environment configuration.
     if not provider_url:
-        provider_url = "wss://eth-mainnet.g.alchemy.com/v2/YOUR-API-KEY"
+        provider_url = os.getenv("ALCHEMY_WS_URL") or os.getenv("INFURA_WS_URL")
     
     # Create listener
     listener = StreamListener(provider_url=provider_url)
